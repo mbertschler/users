@@ -16,7 +16,7 @@ var (
 )
 
 type stringStore struct {
-	users.Store
+	*users.Store
 }
 
 func (s stringStore) GetData(w http.ResponseWriter, r *http.Request) (*users.User, string, error) {
@@ -35,7 +35,7 @@ func main() {
 	flag.StringVar(&path, "path", "./users.db", "Path for db file")
 	flag.Parse()
 
-	userStore = stringStore{users.NewMemoryStore("/")}
+	userStore = stringStore{users.NewMemoryStore()}
 
 	http.HandleFunc("/", index)
 	http.HandleFunc("/login", login)
@@ -125,11 +125,6 @@ func index(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
-	// data, ok := user.Data.(string)
-	// if !ok {
-	// 	data = "&nbsp;"
-	// }
 
 	w.Write([]byte(header + `
 		<h1>Testapp for package "github.com/mbertschler/users"</h1>
