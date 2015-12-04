@@ -29,11 +29,33 @@ func NewMemoryStore(path string) *MemoryStore {
 	return &s
 }
 
-func (s *MemoryStore) Close() error {
+func (s *MemoryStore) Get(w http.ResponseWriter, r *http.Request) (*User, error) {
+	sess, ok, err := s.getSession(r)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	if !ok {
+		err = s.saveSession(w, sess)
+		if err != nil {
+			return &User{Session: sess}, err
+		}
+	}
+	user, err := s.getUser(sess)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	user.Session = sess
+	return user, nil
+}
+
+func (s *MemoryStore) Save(u *User) error {
+	user := *u
+	user.Session = nil
+	s.users[u.Name] = user
 	return nil
 }
 
-func (s *MemoryStore) GetSession(r *http.Request) (*Session, bool, error) {
+func (s *MemoryStore) getSession(r *http.Request) (*Session, bool, error) {
 	cookie, err := r.Cookie(SessionCookieName)
 	if err != nil {
 		if err == http.ErrNoCookie {
@@ -62,7 +84,7 @@ func (s *MemoryStore) GetSession(r *http.Request) (*Session, bool, error) {
 	return &sess, true, nil
 }
 
-func (s *MemoryStore) SaveSession(w http.ResponseWriter, sess *Session) error {
+func (s *MemoryStore) saveSession(w http.ResponseWriter, sess *Session) error {
 	cookie := http.Cookie{
 		Name:     SessionCookieName,
 		Value:    sess.ID,
@@ -75,7 +97,24 @@ func (s *MemoryStore) SaveSession(w http.ResponseWriter, sess *Session) error {
 	return nil
 }
 
-func (s *MemoryStore) Register(sess *Session, name, pass string) (*User, error) {
+func (s *MemoryStore) Register(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error) {
+	sess, _, err := s.getSession(r)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	u, err := s.register(sess, user, pass)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	u.Session = sess
+	err = s.saveSession(w, sess)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	return u, nil
+}
+
+func (s *MemoryStore) register(sess *Session, name, pass string) (*User, error) {
 	_, ok := s.users[name]
 	if ok {
 		return nil, UserExists
@@ -94,7 +133,6 @@ func (s *MemoryStore) Register(sess *Session, name, pass string) (*User, error) 
 	if err != nil {
 		return nil, err
 	}
-
 	s.users[name] = user
 	sess.LoggedIn = true
 	sess.Bound = true
@@ -102,7 +140,24 @@ func (s *MemoryStore) Register(sess *Session, name, pass string) (*User, error) 
 	return &user, nil
 }
 
-func (s *MemoryStore) Login(sess *Session, username, password string) (*User, error) {
+func (s *MemoryStore) Login(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error) {
+	sess, _, err := s.getSession(r)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	u, err := s.login(sess, user, pass)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	u.Session = sess
+	err = s.saveSession(w, sess)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	return u, nil
+}
+
+func (s *MemoryStore) login(sess *Session, username, password string) (*User, error) {
 	user, ok := s.users[username]
 	if !ok {
 		return nil, LoginWrong
@@ -121,12 +176,34 @@ func (s *MemoryStore) Login(sess *Session, username, password string) (*User, er
 	return nil, LoginWrong
 }
 
-func (s *MemoryStore) Logout(sess *Session) error {
+func (s *MemoryStore) Logout(w http.ResponseWriter, r *http.Request) error {
+	sess, ok, err := s.getSession(r)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return NotLoggedIn
+	}
+	err = s.logout(sess)
+	if err != nil {
+		return err
+	}
+	err = s.saveSession(w, sess)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *MemoryStore) logout(sess *Session) error {
+	if sess.LoggedIn == false || sess.Bound == false {
+		return NotLoggedIn
+	}
 	sess.LoggedIn = false
 	return nil
 }
 
-func (s *MemoryStore) GetUser(sess *Session) (*User, error) {
+func (s *MemoryStore) getUser(sess *Session) (*User, error) {
 	if sess.LoggedIn && sess.Bound {
 		u, ok := s.users[sess.User]
 		if ok {
@@ -135,11 +212,6 @@ func (s *MemoryStore) GetUser(sess *Session) (*User, error) {
 		return nil, UserNotFound
 	}
 	return nil, NotLoggedIn
-}
-
-func (s *MemoryStore) SaveUser(u *User) error {
-	s.users[u.Name] = *u
-	return nil
 }
 
 // type BoltDBStore struct {

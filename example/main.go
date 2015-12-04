@@ -37,35 +37,87 @@ func main() {
 	log.Fatal(http.ListenAndServe(port, nil))
 }
 
-func index(w http.ResponseWriter, r *http.Request) {
-	sess, ok, err := userStore.GetSession(r)
-	if err != nil {
-		log.Println(err)
+func login(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("Method not allowed"))
 		return
 	}
-	if !ok {
-		err = userStore.SaveSession(w, sess)
-		if err != nil {
-			log.Println(err)
+	_, err := userStore.Login(w, r,
+		r.PostFormValue("user"),
+		r.PostFormValue("pass"),
+	)
+	if err != nil {
+		log.Println("Login error:", err)
+		w.Write(errorPage(fmt.Sprintln("Login error:", err)))
+	} else {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	}
+}
+func register(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("Method not allowed"))
+		return
+	}
+	_, err := userStore.Register(w, r,
+		r.PostFormValue("user"),
+		r.PostFormValue("pass"))
+	if err != nil {
+		log.Println("Register error:", err)
+		w.Write(errorPage(fmt.Sprintln("Register error:", err)))
+	} else {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	}
+}
+func logout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("Method not allowed"))
+	}
+	err := userStore.Logout(w, r)
+	if err != nil {
+		log.Println("Logout error:", err)
+		w.Write(errorPage(fmt.Sprintln("Logout error:", err)))
+	} else {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	}
+}
+func save(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("Method not allowed"))
+	}
+	user, err := userStore.Get(w, r)
+	if err != nil {
+		log.Println("Save error 1:", err)
+		w.Write(errorPage(fmt.Sprintln("Save error 1:", err)))
+		return
+	}
+	user.Data = r.PostFormValue("val")
+	err = userStore.Save(user)
+	if err != nil {
+		log.Println("Save error 2:", err)
+		w.Write(errorPage(fmt.Sprintln("Save error 2:", err)))
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+func index(w http.ResponseWriter, r *http.Request) {
+	user, err := userStore.Get(w, r)
+	if err != nil {
+		if err != users.NotLoggedIn {
+			log.Println("Index error:", err)
+			w.Write(errorPage(fmt.Sprintln("Index error:", err)))
+			return
 		}
 	}
-	user, err := userStore.GetUser(sess)
-	//store := userStore.(*users.MemoryStore)
-	//body := ""
-	// for name := range store.users {
-	// 	body += `<tr>
-	// 			<td>` + name + `</td>
-	// 		</tr>`
-	// }
-	// sessionsTable := ""
-	// usersTable := `<table border="1">
-	// 	<thead>
-	// 			<th>Users</th>
-	// 	</thead>
-	// 	<tbody>
-	// 		` + body + `
-	// 	</tbody>
-	// </table>`
+
+	data, ok := user.Data.(string)
+	if !ok {
+		data = "&nbsp;"
+	}
+
 	w.Write([]byte(`
 <html>
 	<head>
@@ -104,32 +156,28 @@ func index(w http.ResponseWriter, r *http.Request) {
 			</thead>
 			<tbody>
 				<tr>
-					<td>Session found</td>
-					<td>` + fmt.Sprint(ok) + `</td>
-				</tr>
-				<tr>
 					<td>Session ID</td>
-					<td style="word-break: break-all;">` + fmt.Sprint(sess.ID) + `</td>
+					<td style="word-break: break-all;">` + fmt.Sprint(user.Session.ID) + `</td>
 				</tr>
 				<tr>
 					<td>Session Expires</td>
-					<td>` + fmt.Sprint(sess.Expires) + `</td>
+					<td>` + fmt.Sprint(user.Session.Expires) + `</td>
 				</tr>
 				<tr>
 					<td>Session LastCon</td>
-					<td>` + fmt.Sprint(sess.LastCon) + `</td>
+					<td>` + fmt.Sprint(user.Session.LastCon) + `</td>
 				</tr>
 				<tr>
 					<td>Session Bound</td>
-					<td>` + fmt.Sprint(sess.Bound) + `</td>
+					<td>` + fmt.Sprint(user.Session.Bound) + `</td>
 				</tr>
 				<tr>
 					<td>Session LoggedIn</td>
-					<td>` + fmt.Sprint(sess.LoggedIn) + `</td>
+					<td>` + fmt.Sprint(user.Session.LoggedIn) + `</td>
 				</tr>
 				<tr>
 					<td>Session User</td>
-					<td>` + fmt.Sprint(sess.User) + `</td>
+					<td>` + fmt.Sprint(user.Name) + `</td>
 				</tr>
 			</tbody>
 		</table>
@@ -157,88 +205,52 @@ func index(w http.ResponseWriter, r *http.Request) {
 		</div>
 		<div>
 			<h2>Set Value</h2>
-			<p>` + "Val" + `</p>
+			<p>` + data + `</p>
 			<form action="/save" method="POST">
 				<input type="text" name="val" placeholder="Value"/> <br/>
 				<button type="submit">Save</button>
 			</form>
 		</div>
-		` + /*usersTable +*/ `
 	</body>
 </html>
 `))
 }
-func login(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		w.Write([]byte("Method not allowed"))
-		return
-	}
-	sess, _, err := userStore.GetSession(r)
-	if err != nil {
-		log.Println(err)
-		return
-	}
 
-	_, err = userStore.Login(sess,
-		r.PostFormValue("user"),
-		r.PostFormValue("pass"))
-	if err != nil {
-		log.Println("Login error:", err)
-	}
-	err = userStore.SaveSession(w, sess)
-	if err != nil {
-		log.Println(err)
-	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-func register(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		w.Write([]byte("Method not allowed"))
-		return
-	}
-	sess, _, err := userStore.GetSession(r)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	_, err = userStore.Register(sess,
-		r.PostFormValue("user"),
-		r.PostFormValue("pass"))
-	if err != nil {
-		log.Println("Register error:", err)
-	}
-	err = userStore.SaveSession(w, sess)
-	if err != nil {
-		log.Println(err)
-	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-func logout(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		w.Write([]byte("Method not allowed"))
-	}
-	sess, _, err := userStore.GetSession(r)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	err = userStore.Logout(sess)
-	if err != nil {
-		log.Println("Logout error:", err)
-	}
-	err = userStore.SaveSession(w, sess)
-	if err != nil {
-		log.Println(err)
-	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-func save(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		w.Write([]byte("Method not allowed"))
-	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+func errorPage(in string) []byte {
+	return []byte(`
+<html>
+	<head>
+		<style>
+			body{
+				font-family: sans-serif;
+				font-size:16px;
+				color: #333;
+			}
+			td {
+			    padding: 4px;
+			}
+			th {
+			    padding: 6px;
+			    font-size:19px;
+			    background-color:#ddd;
+			}
+			input, button {
+				font-size:16px;
+				padding:3px;
+				margin-top:6px;
+			}
+			div {
+				display: inline-block;
+				width: 200px;
+				vertical-align:top;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>Error</h1>
+		<p>` + in + `</p>
+		<a href="/"><button type="submit">Back</button></a>
+	</body>
+</html>
+`)
 }

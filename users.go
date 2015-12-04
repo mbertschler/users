@@ -16,17 +16,11 @@ import (
 // ==================================================
 
 type Store interface {
-	GetSession(*http.Request) (*Session, bool, error)
-	SaveSession(http.ResponseWriter, *Session) error
-
-	GetUser(*Session) (*User, error)
-	SaveUser(*User) error
-
-	Register(s *Session, name, pass string) (*User, error)
-	Login(s *Session, user, pass string) (*User, error)
-	Logout(*Session) error
-
-	Close() error
+	Get(w http.ResponseWriter, r *http.Request) (*User, error)
+	Save(u *User) error
+	Register(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error)
+	Login(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error)
+	Logout(w http.ResponseWriter, r *http.Request) error
 }
 
 const (
@@ -76,6 +70,7 @@ type User struct {
 	Pass []byte
 	Salt []byte
 	Data interface{}
+	*Session
 }
 
 func DecodeUser(v []byte) (*User, error) {
