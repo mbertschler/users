@@ -48,11 +48,44 @@ func (s *MemoryStore) Get(w http.ResponseWriter, r *http.Request) (*User, error)
 	return user, nil
 }
 
+func (s *MemoryStore) GetID(id string) (*User, error) {
+	sess, ok, err := s.getSessionID(id)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	if !ok {
+		err = s.saveSessionID(sess)
+		if err != nil {
+			return &User{Session: sess}, err
+		}
+	}
+	user, err := s.getUser(sess)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	user.Session = sess
+	return user, nil
+}
+
 func (s *MemoryStore) Save(u *User) error {
 	user := *u
 	user.Session = nil
 	s.users[u.Name] = user
 	return nil
+}
+
+func (s *MemoryStore) getSessionID(id string) (*Session, bool, error) {
+	sess, ok := s.sessions[id]
+	// TODO check if session is expired
+	if !ok {
+		if SessionDebug {
+			log.Println("Not found:    ", id[:10])
+			log.Println("Didn't find session - creating new")
+		}
+		sess, err := makeSession()
+		return sess, false, err
+	}
+	return &sess, ok, nil
 }
 
 func (s *MemoryStore) getSession(r *http.Request) (*Session, bool, error) {
@@ -70,18 +103,7 @@ func (s *MemoryStore) getSession(r *http.Request) (*Session, bool, error) {
 	if SessionDebug {
 		//log.Println("Loading session from MemoryStore")
 	}
-	sess, ok := s.sessions[cookie.Value]
-	// TODO check if session is expired
-	if !ok {
-		if SessionDebug {
-			log.Println("Not found:    ", cookie.Value[:10])
-			log.Println("Didn't find session - creating new")
-		}
-		sess, err := makeSession()
-		return sess, false, err
-	}
-
-	return &sess, true, nil
+	return s.getSessionID(cookie.Value)
 }
 
 func (s *MemoryStore) saveSession(w http.ResponseWriter, sess *Session) error {
@@ -97,6 +119,11 @@ func (s *MemoryStore) saveSession(w http.ResponseWriter, sess *Session) error {
 	return nil
 }
 
+func (s *MemoryStore) saveSessionID(sess *Session) error {
+	s.sessions[sess.ID] = *sess
+	return nil
+}
+
 func (s *MemoryStore) Register(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error) {
 	sess, _, err := s.getSession(r)
 	if err != nil {
@@ -108,6 +135,23 @@ func (s *MemoryStore) Register(w http.ResponseWriter, r *http.Request, user, pas
 	}
 	u.Session = sess
 	err = s.saveSession(w, sess)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	return u, nil
+}
+
+func (s *MemoryStore) RegisterID(id string, user, pass string) (*User, error) {
+	sess, _, err := s.getSessionID(id)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	u, err := s.register(sess, user, pass)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	u.Session = sess
+	err = s.saveSessionID(sess)
 	if err != nil {
 		return &User{Session: sess}, err
 	}
@@ -157,6 +201,23 @@ func (s *MemoryStore) Login(w http.ResponseWriter, r *http.Request, user, pass s
 	return u, nil
 }
 
+func (s *MemoryStore) LoginID(id string, user, pass string) (*User, error) {
+	sess, _, err := s.getSessionID(id)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	u, err := s.login(sess, user, pass)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	u.Session = sess
+	err = s.saveSessionID(sess)
+	if err != nil {
+		return &User{Session: sess}, err
+	}
+	return u, nil
+}
+
 func (s *MemoryStore) login(sess *Session, username, password string) (*User, error) {
 	user, ok := s.users[username]
 	if !ok {
@@ -195,6 +256,25 @@ func (s *MemoryStore) Logout(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+func (s *MemoryStore) LogoutID(id string) error {
+	sess, ok, err := s.getSessionID(id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return NotLoggedIn
+	}
+	err = s.logout(sess)
+	if err != nil {
+		return err
+	}
+	err = s.saveSessionID(sess)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *MemoryStore) logout(sess *Session) error {
 	if sess.LoggedIn == false || sess.Bound == false {
 		return NotLoggedIn
@@ -213,88 +293,3 @@ func (s *MemoryStore) getUser(sess *Session) (*User, error) {
 	}
 	return nil, NotLoggedIn
 }
-
-// type BoltDBStore struct {
-// 	db *bolt.DB
-// }
-
-// func NewBoltDBStore(path string, mode os.FileMode, options *bolt.Options) *BoltDBStore {
-// 	var s = BoltDBStore{
-// 		users:    make(map[string]User),
-// 		sessions: make(map[string]Session),
-// 	}
-// 	return &s
-// }
-
-// type OpenBoltDBStore struct {
-// 	db            *bolt.DB
-// 	sessionBucket string
-// 	userBucket    string
-// }
-
-// func NewOpenBoltDBStore(db *bolt.DB, sessionBucket, userBucket string) *OpenBoltDBStore {
-// 	var s = OpenBoltDBStore{
-// 		users:    make(map[string]User),
-// 		sessions: make(map[string]Session),
-// 	}
-// 	return &s
-// }
-
-// func loadDB() {
-// 	var err error
-// 	db, err := bolt.Open(config.DBPath, 0644, &bolt.Options{Timeout: 1 * time.Second})
-// 	if err != nil {
-// 		log.Fatal("Could not open DB at", config.DBPath, ": ", err)
-// 	}
-// 	db.Update(func(tx *bolt.Tx) error {
-// 		_, err = tx.CreateBucketIfNotExists(BucketApp)
-// 		if err != nil {
-// 			log.Fatalln("Bucket app could not be created")
-// 		}
-// 		_, err = tx.CreateBucketIfNotExists(BucketEvents)
-// 		if err != nil {
-// 			log.Fatalln("Bucket events could not be created")
-// 		}
-// 		_, err = tx.CreateBucketIfNotExists(BucketProjects)
-// 		if err != nil {
-// 			log.Fatalln("Bucket projects could not be created")
-// 		}
-// 		_, err = tx.CreateBucketIfNotExists(BucketJury)
-// 		if err != nil {
-// 			log.Fatalln("Bucket jury could not be created")
-// 		}
-// 		_, err = tx.CreateBucketIfNotExists(BucketSMS)
-// 		if err != nil {
-// 			log.Fatalln("Bucket sms could not be created")
-// 		}
-// 		_, err = tx.CreateBucketIfNotExists(BucketSessions)
-// 		if err != nil {
-// 			log.Fatalln("Bucket sms could not be created")
-// 		}
-// 		return nil
-// 	})
-// }
-
-// func B(in string) []byte {
-// 	return []byte(in)
-// }
-
-// func IDtoBytes(id uint64) []byte {
-// 	idbytes := make([]byte, 8)
-// 	binary.BigEndian.PutUint64(idbytes, id)
-// 	return idbytes
-// }
-
-// func BytesToID(b []byte) uint64 {
-// 	return binary.BigEndian.Uint64(b)
-// }
-
-// func TimeToBytes(t time.Time) []byte {
-// 	buf := make([]byte, 8)
-// 	binary.BigEndian.PutUint64(buf, uint64(t.UnixNano()))
-// 	return buf
-// }
-// func BytesToTime(b []byte) time.Time {
-// 	unixnano := binary.BigEndian.Uint64(b)
-// 	return time.Unix(0, int64(unixnano))
-// }

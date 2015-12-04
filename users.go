@@ -11,23 +11,53 @@ import (
 	"time"
 )
 
-// ==================================================
-// =================== Operations ===================
-// ==================================================
-
-type Store interface {
-	Get(w http.ResponseWriter, r *http.Request) (*User, error)
-	Save(u *User) error
-	Register(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error)
-	Login(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error)
-	Logout(w http.ResponseWriter, r *http.Request) error
-}
-
 const (
 	SessionCookieName       = "id"
 	SessionCookieExpiration = time.Hour * 24 * 90
 	SessionDebug            = true
 )
+
+// ==================================================
+// ===================== Errors =====================
+// ==================================================
+
+var (
+	UserExists   = errors.New("User already exists")
+	UserNotFound = errors.New("User not found")
+	ServerError  = errors.New("User server error")
+	LoginWrong   = errors.New("Login is wrong")
+	NotLoggedIn  = errors.New("Not logged in")
+)
+
+// ==================================================
+// ================= Main Interface =================
+// ==================================================
+
+type Store interface {
+	Get(w http.ResponseWriter, r *http.Request) (*User, error)
+	Register(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error)
+	Login(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error)
+	Logout(w http.ResponseWriter, r *http.Request) error
+
+	GetID(id string) (*User, error)
+	RegisterID(id string, user, pass string) (*User, error)
+	LoginID(id string, user, pass string) (*User, error)
+	LogoutID(id string) error
+
+	Save(u *User) error
+}
+
+// ==================================================
+// ====================== Types =====================
+// ==================================================
+
+type User struct {
+	Name string
+	Pass []byte
+	Salt []byte
+	Data interface{}
+	*Session
+}
 
 type Session struct {
 	ID       string
@@ -57,22 +87,6 @@ func makeSession() (*Session, error) {
 	return &s, nil
 }
 
-var (
-	UserExists   = errors.New("User already exists")
-	UserNotFound = errors.New("User not found")
-	ServerError  = errors.New("User server error")
-	LoginWrong   = errors.New("Login is wrong")
-	NotLoggedIn  = errors.New("Not logged in")
-)
-
-type User struct {
-	Name string
-	Pass []byte
-	Salt []byte
-	Data interface{}
-	*Session
-}
-
 func DecodeUser(v []byte) (*User, error) {
 	user := new(User)
 	err := gob.NewDecoder(bytes.NewBuffer(v)).Decode(user)
@@ -90,20 +104,3 @@ func (u User) Encode() ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
-
-// func DELETEallUsers() {
-// 	err := db.Update(func(tx *bolt.Tx) error {
-// 		err := tx.DeleteBucket([]byte("users"))
-// 		if err != nil {
-// 			fmt.Println("DeleteBucket error:", err)
-// 		}
-// 		_, err = tx.CreateBucketIfNotExists([]byte("users"))
-// 		if err != nil {
-// 			log.Fatalln("Bucket users could not be created", err)
-// 		}
-// 		return nil
-// 	})
-// 	if err != nil {
-// 		fmt.Println("ERROR:", err)
-// 	}
-// }

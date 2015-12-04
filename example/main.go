@@ -12,8 +12,21 @@ import (
 var (
 	port      string
 	path      string
-	userStore users.Store
+	userStore stringStore
 )
+
+type stringStore struct {
+	users.Store
+}
+
+func (s stringStore) GetData(w http.ResponseWriter, r *http.Request) (*users.User, string, error) {
+	u, err := s.Get(w, r)
+	data, ok := u.Data.(string)
+	if !ok {
+		data = "&nbsp;"
+	}
+	return u, data, err
+}
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -22,7 +35,7 @@ func main() {
 	flag.StringVar(&path, "path", "./users.db", "Path for db file")
 	flag.Parse()
 
-	userStore = users.NewMemoryStore("/")
+	userStore = stringStore{users.NewMemoryStore("/")}
 
 	http.HandleFunc("/", index)
 	http.HandleFunc("/login", login)
@@ -104,7 +117,7 @@ func save(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 func index(w http.ResponseWriter, r *http.Request) {
-	user, err := userStore.Get(w, r)
+	user, data, err := userStore.GetData(w, r)
 	if err != nil {
 		if err != users.NotLoggedIn {
 			log.Println("Index error:", err)
@@ -113,41 +126,12 @@ func index(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	data, ok := user.Data.(string)
-	if !ok {
-		data = "&nbsp;"
-	}
+	// data, ok := user.Data.(string)
+	// if !ok {
+	// 	data = "&nbsp;"
+	// }
 
-	w.Write([]byte(`
-<html>
-	<head>
-		<style>
-			body{
-				font-family: sans-serif;
-				font-size:16px;
-				color: #333;
-			}
-			td {
-			    padding: 4px;
-			}
-			th {
-			    padding: 6px;
-			    font-size:19px;
-			    background-color:#ddd;
-			}
-			input, button {
-				font-size:16px;
-				padding:3px;
-				margin-top:6px;
-			}
-			div {
-				display: inline-block;
-				width: 200px;
-				vertical-align:top;
-			}
-		</style>
-	</head>
-	<body>
+	w.Write([]byte(header + `
 		<h1>Testapp for package "github.com/mbertschler/users"</h1>
 		<table border="1">
 			<thead>
@@ -157,7 +141,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 			<tbody>
 				<tr>
 					<td>Session ID</td>
-					<td style="word-break: break-all;">` + fmt.Sprint(user.Session.ID) + `</td>
+					<td style="word-break: break-all;">` + fmt.Sprint(user.ID) + `</td>
 				</tr>
 				<tr>
 					<td>Session Expires</td>
@@ -210,14 +194,19 @@ func index(w http.ResponseWriter, r *http.Request) {
 				<input type="text" name="val" placeholder="Value"/> <br/>
 				<button type="submit">Save</button>
 			</form>
-		</div>
-	</body>
-</html>
-`))
+		</div>` + footer))
 }
 
 func errorPage(in string) []byte {
-	return []byte(`
+	return []byte(header + `
+		<h1>Testapp for package "github.com/mbertschler/users"</h1>
+		<h2>Error</h2>
+		<p>` + in + `</p>
+		<a href="/"><button type="submit">Back</button></a>
+	` + footer)
+}
+
+var header = `
 <html>
 	<head>
 		<style>
@@ -246,11 +235,9 @@ func errorPage(in string) []byte {
 			}
 		</style>
 	</head>
-	<body>
-		<h1>Error</h1>
-		<p>` + in + `</p>
-		<a href="/"><button type="submit">Back</button></a>
+	<body>`
+
+var footer = `
 	</body>
 </html>
-`)
-}
+`
