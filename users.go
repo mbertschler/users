@@ -63,12 +63,20 @@ type Storer interface {
 	GetSession(id string) (*Session, error)
 	// Put a Session into the store
 	PutSession(s *Session) error
+	// Delete a Session from the store
+	DeleteSession(id string) error
+	// Run fn for each session and delete if true is returned
+	ForEachSession(fn func(s *Session) (del bool)) error
 
 	// Get a User from the store
 	// If User is not found, error needs to be ErrUserNotFound
 	GetUser(name string) (*User, error)
 	// Put a User into the store
 	PutUser(u *User) error
+	// Delete a User from the store
+	DeleteUser(username string) error
+	// Run fn for each user and delete if true is returned
+	ForEachUser(fn func(u *User) (del bool)) error
 }
 
 // Store is the main type of this library. It has a backend which can store
@@ -135,11 +143,15 @@ func (s *Store) getID(id string) (*User, bool, error) {
 	return user, changed, nil
 }
 
-// Save saves a User object in the Store.
-// The session stays untouched.
-func (s *Store) Save(u *User) error {
-	user := *u
-	user.Session = nil
+// Save saves the passed data into the Data field of the User object
+// with the name specified in username. If the user
+// does not exist ErrUserNotFound is returned.
+func (s *Store) SaveData(username string, data interface{}) error {
+	u, err := s.store.GetUser(username)
+	if err != nil {
+		return ErrUserNotFound
+	}
+	u.Data = data
 	return s.store.PutUser(u)
 }
 
@@ -269,6 +281,143 @@ func (s *Store) register(sess *Session, name, pass string) (*User, error) {
 	return &user, nil
 }
 
+// SetName renames the current user to the new name. If the new
+// username already exists ErrUserExists is returned. If there is no current
+// user logged in ErrNotLoggedIn is returned.
+func (s *Store) SetName(w http.ResponseWriter, r *http.Request, name string) (*User, error) {
+	u, changed, err := s.setNameID(s.getCookieID(r), name)
+	if changed {
+		s.saveCookie(w, u.Session)
+	}
+	return u, err
+}
+
+// SetNameID renames the current user to the new name. If the new
+// username already exists ErrUserExists is returned. If there is no current
+// user logged in ErrNotLoggedIn is returned.
+//
+// It is the callers responsibility to pass the session token (User.ID) back
+// to the client.
+func (s *Store) SetNameID(id string, name string) (*User, error) {
+	u, _, err := s.setNameID(id, name)
+	return u, err
+}
+
+func (s *Store) setNameID(id string, name string) (*User, bool, error) {
+	sess, changed, err := s.getSessionID(id)
+	if err != nil {
+		return &User{Session: sess}, changed, err
+	}
+	u, err := s.setName(sess, name)
+	if err != nil {
+		return &User{Session: sess}, changed, err
+	}
+	u.Session = sess
+	err = s.store.PutSession(sess)
+	changed = true
+	if err != nil {
+		return &User{Session: sess}, changed, err
+	}
+	return u, changed, nil
+}
+
+func (s *Store) setName(sess *Session, name string) (*User, error) {
+	if !sess.LoggedIn {
+		return nil, ErrNotLoggedIn
+	}
+	user, err := s.store.GetUser(sess.User)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = s.store.GetUser(name)
+	if err == nil {
+		return nil, ErrUserExists
+	}
+	if err != ErrUserNotFound {
+		return nil, err
+	}
+
+	err = s.store.DeleteUser(user.Name)
+	if err != nil {
+		return user, err
+	}
+
+	user.Name = name
+	err = s.store.PutUser(user)
+	if err != nil {
+		return user, err
+	}
+
+	sess.User = name
+	return user, nil
+}
+
+// SetPassword sets the password of the current user to a new one. If
+// there is no current user logged in ErrNotLoggedIn is returned.
+func (s *Store) SetPassword(w http.ResponseWriter, r *http.Request, pass string) (*User, error) {
+	u, changed, err := s.setPasswordID(s.getCookieID(r), pass)
+	if changed {
+		s.saveCookie(w, u.Session)
+	}
+	return u, err
+}
+
+// SetPassword sets the password of the current user to a new one. If
+// there is no current user logged in ErrNotLoggedIn is returned.
+//
+// It is the callers responsibility to pass the session token (User.ID) back
+// to the client.
+func (s *Store) SetPasswordID(id string, pass string) (*User, error) {
+	u, _, err := s.setPasswordID(id, pass)
+	return u, err
+}
+
+func (s *Store) setPasswordID(id string, pass string) (*User, bool, error) {
+	sess, changed, err := s.getSessionID(id)
+	if err != nil {
+		return &User{Session: sess}, changed, err
+	}
+	u, err := s.setPassword(sess, pass)
+	if err != nil {
+		return &User{Session: sess}, changed, err
+	}
+	u.Session = sess
+	err = s.store.PutSession(sess)
+	changed = true
+	if err != nil {
+		return &User{Session: sess}, changed, err
+	}
+	return u, changed, nil
+}
+
+func (s *Store) setPassword(sess *Session, pass string) (*User, error) {
+	if !sess.LoggedIn {
+		return nil, ErrNotLoggedIn
+	}
+	user, err := s.store.GetUser(sess.User)
+	if err != nil {
+		return nil, err
+	}
+
+	user.Salt = make([]byte, 32)
+	_, err = rand.Read(user.Salt)
+	if err != nil {
+		return nil, err
+	}
+
+	user.Pass, err = scrypt.Key([]byte(pass), user.Salt, 16384, 8, 1, 32)
+	if err != nil {
+		return nil, err
+	}
+
+	err = s.store.PutUser(user)
+	if err != nil {
+		return user, err
+	}
+	return user, nil
+}
+
 // Login logs a user in with a username and password. If the credentials for
 // the login are wrong, ErrLoginWrong is returned.
 func (s *Store) Login(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error) {
@@ -362,6 +511,54 @@ func (s *Store) logoutID(id string) (*Session, bool, error) {
 		err = ErrNotLoggedIn
 	} else {
 		sess.LoggedIn = false
+	}
+	if err != nil {
+		return sess, changed, err
+	}
+	err = s.store.PutSession(sess)
+	changed = true
+	if err != nil {
+		return sess, changed, err
+	}
+	return sess, changed, nil
+}
+
+// Delete deletes the user that is associated with this client. It
+// returns ErrNotLoggedIn if no user is currently logged in.
+func (s *Store) Delete(w http.ResponseWriter, r *http.Request) (*User, error) {
+	sess, changed, err := s.deleteID(s.getCookieID(r))
+	if changed {
+		s.saveCookie(w, sess)
+	}
+	return &User{Session: sess}, err
+}
+
+// LogoutID deltes the user that is associated with this session id. It
+// returns ErrNotLoggedIn if no user is currently logged in.
+//
+// It is the callers responsibility to pass the session token (User.ID) back
+// to the client.
+func (s *Store) DeleteID(id string) (*User, error) {
+	sess, _, err := s.deleteID(id)
+	return &User{Session: sess}, err
+}
+
+func (s *Store) deleteID(id string) (*Session, bool, error) {
+	sess, changed, err := s.getSessionID(id)
+	if err != nil {
+		return sess, changed, err
+	}
+	if changed {
+		return sess, changed, ErrNotLoggedIn
+	}
+	if sess.LoggedIn == false {
+		err = ErrNotLoggedIn
+	} else {
+		err = s.store.DeleteUser(sess.User)
+		if err == nil {
+			sess.LoggedIn = false
+			sess.User = ""
+		}
 	}
 	if err != nil {
 		return sess, changed, err

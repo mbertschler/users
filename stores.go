@@ -65,6 +65,36 @@ func (s *memoryStore) PutSession(sess *Session) error {
 	return nil
 }
 
+// DeleteSession deletes a session object from the memoryStore
+func (s *memoryStore) DeleteSession(id string) error {
+	if storeDebug {
+		log.Println("DeleteSession:", id)
+	}
+	s.sessionsMutex.Lock()
+	delete(s.sessions, id)
+	s.sessionsMutex.Unlock()
+	return nil
+}
+
+// ForEachSession ranges over all sessions from the memoryStore
+func (s *memoryStore) ForEachSession(fn func(s *Session) (del bool)) error {
+	if storeDebug {
+		log.Println("ForEachSession")
+	}
+	s.sessionsMutex.RLock()
+	for k, v := range s.sessions {
+		if fn(&v) {
+			s.sessionsMutex.RUnlock()
+			s.sessionsMutex.Lock()
+			delete(s.sessions, k)
+			s.sessionsMutex.Unlock()
+			s.sessionsMutex.RLock()
+		}
+	}
+	s.sessionsMutex.RUnlock()
+	return nil
+}
+
 // GetUser gets a User object from the memoryStore
 func (s *memoryStore) GetUser(name string) (*User, error) {
 	if storeDebug {
@@ -87,6 +117,36 @@ func (s *memoryStore) PutUser(u *User) error {
 	s.usersMutex.Lock()
 	s.users[u.Name] = *u
 	s.usersMutex.Unlock()
+	return nil
+}
+
+// DeleteUser deletes a user object from the memoryStore
+func (s *memoryStore) DeleteUser(username string) error {
+	if storeDebug {
+		log.Println("DeleteUser:", username)
+	}
+	s.usersMutex.Lock()
+	delete(s.users, username)
+	s.usersMutex.Unlock()
+	return nil
+}
+
+// ForEachUser ranges over all users from the memoryStore
+func (s *memoryStore) ForEachUser(fn func(u *User) (del bool)) error {
+	if storeDebug {
+		log.Println("ForEachSession")
+	}
+	s.usersMutex.RLock()
+	for k, v := range s.users {
+		if fn(&v) {
+			s.usersMutex.RUnlock()
+			s.usersMutex.Lock()
+			delete(s.users, k)
+			s.usersMutex.Unlock()
+			s.usersMutex.RLock()
+		}
+	}
+	s.usersMutex.RUnlock()
 	return nil
 }
 

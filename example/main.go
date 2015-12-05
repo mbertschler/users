@@ -54,6 +54,9 @@ func main() {
 	http.HandleFunc("/login", login)
 	http.HandleFunc("/register", register)
 	http.HandleFunc("/logout", logout)
+	http.HandleFunc("/delete", del)
+	http.HandleFunc("/rename", rename)
+	http.HandleFunc("/password", password)
 	http.HandleFunc("/save", save)
 
 	log.Println("Testapp for \"github.com/mbertschler/users\"")
@@ -110,6 +113,48 @@ func logout(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	}
 }
+func del(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("Method not allowed"))
+		return
+	}
+	_, err := userStore.Delete(w, r)
+	if err != nil {
+		log.Println("Delete error:", err)
+		w.Write(errorPage(fmt.Sprintln("Delete error:", err)))
+	} else {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	}
+}
+func rename(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("Method not allowed"))
+		return
+	}
+	_, err := userStore.SetName(w, r, r.PostFormValue("name"))
+	if err != nil {
+		log.Println("Rename error:", err)
+		w.Write(errorPage(fmt.Sprintln("Rename error:", err)))
+	} else {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	}
+}
+func password(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte("Method not allowed"))
+		return
+	}
+	_, err := userStore.SetPassword(w, r, r.PostFormValue("pass"))
+	if err != nil {
+		log.Println("Password error:", err)
+		w.Write(errorPage(fmt.Sprintln("Password error:", err)))
+	} else {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	}
+}
 func save(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -117,13 +162,15 @@ func save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, err := userStore.Get(w, r)
+	if !user.LoggedIn {
+		err = users.ErrUserNotFound
+	}
 	if err != nil {
 		log.Println("Save error 1:", err)
 		w.Write(errorPage(fmt.Sprintln("Save error 1:", err)))
 		return
 	}
-	user.Data = r.PostFormValue("val")
-	err = userStore.Save(user)
+	err = userStore.SaveData(user.Name, r.PostFormValue("val"))
 	if err != nil {
 		log.Println("Save error 2:", err)
 		w.Write(errorPage(fmt.Sprintln("Save error 2:", err)))
@@ -140,7 +187,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write([]byte(header + `
-		<h1>Testapp for package "github.com/mbertschler/users"</h1>
+		<h1>Testapp for package <a href="https://github.com/mbertschler/users">"github.com/mbertschler/users"</a></h1>
 		<table border="1">
 			<thead>
 					<th>Variable</th>
@@ -153,11 +200,11 @@ func index(w http.ResponseWriter, r *http.Request) {
 				</tr>
 				<tr>
 					<td>Session Expires</td>
-					<td>` + fmt.Sprint(user.Expires) + `</td>
+					<td>` + fmt.Sprint(user.Expires.Format("2006 Jan 02 15:04:05 MST -0700")) + `</td>
 				</tr>
 				<tr>
 					<td>Session LastCon</td>
-					<td>` + fmt.Sprint(user.LastAccess) + `</td>
+					<td>` + fmt.Sprint(user.LastAccess.Format("2006 Jan 02 15:04:05 MST -0700")) + `</td>
 				</tr>
 				<tr>
 					<td>Session LoggedIn</td>
@@ -196,6 +243,27 @@ func index(w http.ResponseWriter, r *http.Request) {
 			</form>
 		</div>
 		<div>
+			<h2>Delete User</h2>
+			<form action="/delete" method="POST">
+				<button type="submit">Delete</button>
+			</form>
+		</div>
+		<br/>
+		<div>
+			<h2>Change Username</h2>
+			<form action="/rename" method="POST">
+				<input type="text" name="name" placeholder="New username"/> <br/>
+				<button type="submit">Change Username</button>
+			</form>
+		</div>
+		<div>
+			<h2>Change Password</h2>
+			<form action="/password" method="POST">
+				<input type="text" name="pass" placeholder="New password"/> <br/>
+				<button type="submit">Change Password</button>
+			</form>
+		</div>
+		<div>
 			<h2>Set Value</h2>
 			<p>` + data + `</p>
 			<form action="/save" method="POST">
@@ -207,7 +275,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 
 func errorPage(in string) []byte {
 	return []byte(header + `
-		<h1>Testapp for package "github.com/mbertschler/users"</h1>
+		<h1>Testapp for package <a href="https://github.com/mbertschler/users">"github.com/mbertschler/users"</a></h1>
 		<h2>Error</h2>
 		<p>` + in + `</p>
 		<a href="/"><button type="submit">Back</button></a>
