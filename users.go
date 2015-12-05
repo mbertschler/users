@@ -48,54 +48,48 @@ type Storer interface {
 	PutUser(u *User) error
 }
 
-/*	Get(w http.ResponseWriter, r *http.Request) (*User, error)
-	Register(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error)
-	Login(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error)
-	Logout(w http.ResponseWriter, r *http.Request) error
-
-	GetID(id string) (*User, error)
-	RegisterID(id string, user, pass string) (*User, error)
-	LoginID(id string, user, pass string) (*User, error)
-	LogoutID(id string) error
-
-	Save(u *User) error*/
-
 func (s *Store) Get(w http.ResponseWriter, r *http.Request) (*User, error) {
-	sess, ok, err := s.getSession(r)
-	if err != nil {
-		return &User{Session: sess}, err
+	user, changed, err := s.getID(s.getCookieID(r))
+	if changed {
+		s.saveCookie(w, user.Session)
 	}
-	if !ok {
-		err = s.saveSession(w, sess)
-		if err != nil {
-			return &User{Session: sess}, err
-		}
-	}
-	user, err := s.getUser(sess)
-	if err != nil {
-		return &User{Session: sess}, err
-	}
-	user.Session = sess
-	return user, nil
+	return user, err
 }
 
 func (s *Store) GetID(id string) (*User, error) {
-	sess, ok, err := s.getSessionID(id)
+	user, _, err := s.getID(id)
+	return user, err
+}
+
+func (s *Store) getID(id string) (*User, bool, error) {
+	sess, changed, err := s.getSessionID(id)
 	if err != nil {
-		return &User{Session: sess}, err
+		return &User{Session: sess}, changed, err
 	}
-	if !ok {
-		err = s.saveSessionID(sess)
+	if changed {
+		err = s.store.PutSession(sess)
 		if err != nil {
-			return &User{Session: sess}, err
+			return &User{Session: sess}, changed, err
 		}
 	}
 	user, err := s.getUser(sess)
 	if err != nil {
-		return &User{Session: sess}, err
+		return &User{Session: sess}, changed, err
 	}
 	user.Session = sess
-	return user, nil
+	return user, changed, nil
+}
+
+func (s *Store) getUser(sess *Session) (*User, error) {
+	if sess.LoggedIn && sess.Bound {
+		u, err := s.store.GetUser(sess.User)
+		if err == nil {
+			return u, nil
+		} else {
+			return nil, err
+		}
+	}
+	return nil, NotLoggedIn
 }
 
 func (s *Store) Save(u *User) error {
@@ -113,11 +107,11 @@ func (s *Store) getSessionID(id string) (*Session, bool, error) {
 				log.Println("Not found:", id[:10], "making new")
 			}
 			sess, err := makeSession()
-			return sess, false, err
+			return sess, true, err
 		}
 		return nil, false, err
 	}
-	return sess, true, nil
+	return sess, false, nil
 }
 
 func (s *Store) getSession(r *http.Request) (*Session, bool, error) {
@@ -128,7 +122,7 @@ func (s *Store) getSession(r *http.Request) (*Session, bool, error) {
 				log.Println("Creating new session")
 			}
 			sess, err := makeSession()
-			return sess, false, err
+			return sess, true, err
 		}
 		return nil, false, err
 	}
@@ -136,6 +130,14 @@ func (s *Store) getSession(r *http.Request) (*Session, bool, error) {
 		//log.Println("Loading session from MemoryStore")
 	}
 	return s.getSessionID(cookie.Value)
+}
+
+func (s *Store) getCookieID(r *http.Request) string {
+	cookie, err := r.Cookie(SessionCookieName)
+	if err != nil {
+		return ""
+	}
+	return cookie.Value
 }
 
 func (s *Store) saveSession(w http.ResponseWriter, sess *Session) error {
@@ -150,42 +152,46 @@ func (s *Store) saveSession(w http.ResponseWriter, sess *Session) error {
 	return s.store.PutSession(sess)
 }
 
-func (s *Store) saveSessionID(sess *Session) error {
-	return s.store.PutSession(sess)
+func (s *Store) saveCookie(w http.ResponseWriter, sess *Session) {
+	cookie := http.Cookie{
+		Name:     SessionCookieName,
+		Value:    sess.ID,
+		Path:     "/",
+		HttpOnly: true,
+		Expires:  sess.Expires,
+	}
+	http.SetCookie(w, &cookie)
 }
 
 func (s *Store) Register(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error) {
-	sess, _, err := s.getSession(r)
-	if err != nil {
-		return &User{Session: sess}, err
+	u, changed, err := s.registerID(s.getCookieID(r), user, pass)
+	if changed {
+		s.saveCookie(w, u.Session)
 	}
-	u, err := s.register(sess, user, pass)
-	if err != nil {
-		return &User{Session: sess}, err
-	}
-	u.Session = sess
-	err = s.saveSession(w, sess)
-	if err != nil {
-		return &User{Session: sess}, err
-	}
-	return u, nil
+	return u, err
 }
 
 func (s *Store) RegisterID(id string, user, pass string) (*User, error) {
-	sess, _, err := s.getSessionID(id)
+	u, _, err := s.registerID(id, user, pass)
+	return u, err
+}
+
+func (s *Store) registerID(id string, user, pass string) (*User, bool, error) {
+	sess, changed, err := s.getSessionID(id)
 	if err != nil {
-		return &User{Session: sess}, err
+		return &User{Session: sess}, changed, err
 	}
 	u, err := s.register(sess, user, pass)
 	if err != nil {
-		return &User{Session: sess}, err
+		return &User{Session: sess}, changed, err
 	}
 	u.Session = sess
-	err = s.saveSessionID(sess)
+	err = s.store.PutSession(sess)
+	changed = true
 	if err != nil {
-		return &User{Session: sess}, err
+		return &User{Session: sess}, changed, err
 	}
-	return u, nil
+	return u, changed, nil
 }
 
 func (s *Store) register(sess *Session, name, pass string) (*User, error) {
@@ -222,37 +228,34 @@ func (s *Store) register(sess *Session, name, pass string) (*User, error) {
 }
 
 func (s *Store) Login(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error) {
-	sess, _, err := s.getSession(r)
-	if err != nil {
-		return &User{Session: sess}, err
+	u, changed, err := s.loginID(s.getCookieID(r), user, pass)
+	if changed {
+		s.saveCookie(w, u.Session)
 	}
-	u, err := s.login(sess, user, pass)
-	if err != nil {
-		return &User{Session: sess}, err
-	}
-	u.Session = sess
-	err = s.saveSession(w, sess)
-	if err != nil {
-		return &User{Session: sess}, err
-	}
-	return u, nil
+	return u, err
 }
 
 func (s *Store) LoginID(id string, user, pass string) (*User, error) {
-	sess, _, err := s.getSessionID(id)
+	u, _, err := s.loginID(id, user, pass)
+	return u, err
+}
+
+func (s *Store) loginID(id string, user, pass string) (*User, bool, error) {
+	sess, changed, err := s.getSessionID(id)
 	if err != nil {
-		return &User{Session: sess}, err
+		return &User{Session: sess}, changed, err
 	}
 	u, err := s.login(sess, user, pass)
 	if err != nil {
-		return &User{Session: sess}, err
+		return &User{Session: sess}, changed, err
 	}
 	u.Session = sess
-	err = s.saveSessionID(sess)
+	err = s.store.PutSession(sess)
+	changed = true
 	if err != nil {
-		return &User{Session: sess}, err
+		return &User{Session: sess}, changed, err
 	}
-	return u, nil
+	return u, changed, nil
 }
 
 func (s *Store) login(sess *Session, username, password string) (*User, error) {
@@ -279,41 +282,36 @@ func (s *Store) login(sess *Session, username, password string) (*User, error) {
 }
 
 func (s *Store) Logout(w http.ResponseWriter, r *http.Request) error {
-	sess, ok, err := s.getSession(r)
-	if err != nil {
-		return err
+	sess, changed, err := s.logoutID(s.getCookieID(r))
+	if changed {
+		s.saveCookie(w, sess)
 	}
-	if !ok {
-		return NotLoggedIn
-	}
-	err = s.logout(sess)
-	if err != nil {
-		return err
-	}
-	err = s.saveSession(w, sess)
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func (s *Store) LogoutID(id string) error {
-	sess, ok, err := s.getSessionID(id)
+	_, _, err := s.logoutID(id)
+	return err
+}
+
+func (s *Store) logoutID(id string) (*Session, bool, error) {
+	sess, changed, err := s.getSessionID(id)
 	if err != nil {
-		return err
+		return sess, changed, err
 	}
-	if !ok {
-		return NotLoggedIn
+	if changed {
+		return sess, changed, NotLoggedIn
 	}
 	err = s.logout(sess)
 	if err != nil {
-		return err
+		return sess, changed, err
 	}
-	err = s.saveSessionID(sess)
+	err = s.store.PutSession(sess)
+	changed = true
 	if err != nil {
-		return err
+		return sess, changed, err
 	}
-	return nil
+	return sess, changed, nil
 }
 
 func (s *Store) logout(sess *Session) error {
@@ -322,18 +320,6 @@ func (s *Store) logout(sess *Session) error {
 	}
 	sess.LoggedIn = false
 	return nil
-}
-
-func (s *Store) getUser(sess *Session) (*User, error) {
-	if sess.LoggedIn && sess.Bound {
-		u, err := s.store.GetUser(sess.User)
-		if err == nil {
-			return u, nil
-		} else {
-			return nil, err
-		}
-	}
-	return nil, NotLoggedIn
 }
 
 // ==================================================
