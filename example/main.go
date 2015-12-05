@@ -119,11 +119,9 @@ func save(w http.ResponseWriter, r *http.Request) {
 func index(w http.ResponseWriter, r *http.Request) {
 	user, data, err := userStore.GetData(w, r)
 	if err != nil {
-		if err != users.NotLoggedIn {
-			log.Println("Index error:", err)
-			w.Write(errorPage(fmt.Sprintln("Index error:", err)))
-			return
-		}
+		log.Println("Index error:", err)
+		w.Write(errorPage(fmt.Sprintln("Index error:", err)))
+		return
 	}
 
 	w.Write([]byte(header + `
@@ -147,15 +145,15 @@ func index(w http.ResponseWriter, r *http.Request) {
 					<td>` + fmt.Sprint(user.Session.LastCon) + `</td>
 				</tr>
 				<tr>
-					<td>Session Bound</td>
-					<td>` + fmt.Sprint(user.Session.Bound) + `</td>
-				</tr>
-				<tr>
 					<td>Session LoggedIn</td>
 					<td>` + fmt.Sprint(user.Session.LoggedIn) + `</td>
 				</tr>
 				<tr>
 					<td>Session User</td>
+					<td>` + fmt.Sprint(user.Session.User) + `</td>
+				</tr>
+				<tr>
+					<td>Username</td>
 					<td>` + fmt.Sprint(user.Name) + `</td>
 				</tr>
 			</tbody>

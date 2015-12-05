@@ -1,14 +1,22 @@
 package users
 
-import "log"
+import (
+	"log"
+	"sync"
+)
 
-const StoreDebug = false
+const storeDebug = false
 
+// MemoryStore is a thread safe memory backend for the Store type. It
+// implements the Storer interface and provides user and session storage.
 type MemoryStore struct {
-	sessions map[string]Session
-	users    map[string]User
+	sessions      map[string]Session
+	sessionsMutex sync.RWMutex
+	users         map[string]User
+	usersMutex    sync.RWMutex
 }
 
+// NewMemoryStore returns a Store with an initialized MemoryStore backend
 func NewMemoryStore() *Store {
 	var s = MemoryStore{
 		sessions: make(map[string]Session),
@@ -17,41 +25,53 @@ func NewMemoryStore() *Store {
 	return &Store{&s}
 }
 
+// GetSession gets a Session object from the MemoryStore
 func (s *MemoryStore) GetSession(id string) (*Session, error) {
-	if StoreDebug {
+	if storeDebug {
 		log.Println("GetSession:", id)
 	}
+	s.sessionsMutex.RLock()
 	sess, ok := s.sessions[id]
+	s.sessionsMutex.RUnlock()
 	if !ok {
-		return nil, SessionNotFound
+		return nil, ErrSessionNotFound
 	}
 	return &sess, nil
 }
 
+// PutSession puts a Session object in the MemoryStore
 func (s *MemoryStore) PutSession(sess *Session) error {
-	if StoreDebug {
+	if storeDebug {
 		log.Println("PutSession:", sess.ID)
 	}
+	s.sessionsMutex.Lock()
 	s.sessions[sess.ID] = *sess
+	s.sessionsMutex.Unlock()
 	return nil
 }
 
+// GetUser gets a User object from the MemoryStore
 func (s *MemoryStore) GetUser(name string) (*User, error) {
-	if StoreDebug {
+	if storeDebug {
 		log.Println("GetUser:", name)
 	}
+	s.usersMutex.RLock()
 	u, ok := s.users[name]
+	s.usersMutex.RUnlock()
 	if !ok {
-		return nil, UserNotFound
+		return nil, ErrUserNotFound
 	}
 	return &u, nil
 }
 
+// PutUser puts a User object in the MemoryStore
 func (s *MemoryStore) PutUser(u *User) error {
-	if StoreDebug {
+	if storeDebug {
 		log.Println("PutUser:", u.Name)
 	}
+	s.usersMutex.Lock()
 	s.users[u.Name] = *u
+	s.usersMutex.Unlock()
 	return nil
 }
 

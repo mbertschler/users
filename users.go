@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/gob"
 	"errors"
-	"log"
 	"net/http"
 	"time"
 
@@ -16,7 +14,6 @@ import (
 const (
 	SessionCookieName       = "id"
 	SessionCookieExpiration = time.Hour * 24 * 90
-	SessionDebug            = true
 )
 
 // ==================================================
@@ -24,28 +21,46 @@ const (
 // ==================================================
 
 var (
-	UserExists      = errors.New("User already exists")
-	UserNotFound    = errors.New("User not found")
-	SessionNotFound = errors.New("Session not found")
-	ServerError     = errors.New("User server error")
-	LoginWrong      = errors.New("Login is wrong")
-	NotLoggedIn     = errors.New("Not logged in")
+	// ErrUserNotFound is returned when a store can't find the given user
+	ErrUserNotFound = errors.New("User not found")
+
+	// ErrSessionNotFound is returned when a store can't find the given session
+	ErrSessionNotFound = errors.New("Session not found")
+
+	// ErrUserExists is returned when a new user with a username
+	// that already exists is registered
+	ErrUserExists = errors.New("User already exists")
+
+	// ErrLoginWrong is returned when login credentials are wrong
+	ErrLoginWrong = errors.New("Login is wrong")
+
+	// ErrNotLoggedIn is returned when a logged in user is expected
+	ErrNotLoggedIn = errors.New("Not logged in")
 )
 
 // ==================================================
 // ================= Main Interface =================
 // ==================================================
 
-type Store struct {
-	store Storer
-}
-
+// Storer is implemented for different storage backends. The Get and Put
+// methods need to be safe for use by multiple goroutines simultaneously.
 type Storer interface {
+	// Get a Session from the store
+	// If Session is not found, error needs to be ErrSessionNotFound
 	GetSession(id string) (*Session, error)
+	// Put a Session into the store
 	PutSession(s *Session) error
 
+	// Get a User from the store
+	// If User is not found, error needs to be ErrUserNotFound
 	GetUser(name string) (*User, error)
+	// Put a User into the store
 	PutUser(u *User) error
+}
+
+// Store has all the methods that are called from users of this library.
+type Store struct {
+	store Storer
 }
 
 func (s *Store) Get(w http.ResponseWriter, r *http.Request) (*User, error) {
@@ -72,24 +87,15 @@ func (s *Store) getID(id string) (*User, bool, error) {
 			return &User{Session: sess}, changed, err
 		}
 	}
-	user, err := s.getUser(sess)
+	var user *User
+	if sess.LoggedIn {
+		user, err = s.store.GetUser(sess.User)
+	}
 	if err != nil {
 		return &User{Session: sess}, changed, err
 	}
 	user.Session = sess
 	return user, changed, nil
-}
-
-func (s *Store) getUser(sess *Session) (*User, error) {
-	if sess.LoggedIn && sess.Bound {
-		u, err := s.store.GetUser(sess.User)
-		if err == nil {
-			return u, nil
-		} else {
-			return nil, err
-		}
-	}
-	return nil, NotLoggedIn
 }
 
 func (s *Store) Save(u *User) error {
@@ -102,10 +108,7 @@ func (s *Store) getSessionID(id string) (*Session, bool, error) {
 	sess, err := s.store.GetSession(id)
 	// TODO check if session is expired
 	if err != nil {
-		if err == SessionNotFound {
-			if SessionDebug {
-				log.Println("Not found:", id[:10], "making new")
-			}
+		if err == ErrSessionNotFound {
 			sess, err := makeSession()
 			return sess, true, err
 		}
@@ -118,16 +121,10 @@ func (s *Store) getSession(r *http.Request) (*Session, bool, error) {
 	cookie, err := r.Cookie(SessionCookieName)
 	if err != nil {
 		if err == http.ErrNoCookie {
-			if SessionDebug {
-				log.Println("Creating new session")
-			}
 			sess, err := makeSession()
 			return sess, true, err
 		}
 		return nil, false, err
-	}
-	if SessionDebug {
-		//log.Println("Loading session from MemoryStore")
 	}
 	return s.getSessionID(cookie.Value)
 }
@@ -197,11 +194,10 @@ func (s *Store) registerID(id string, user, pass string) (*User, bool, error) {
 func (s *Store) register(sess *Session, name, pass string) (*User, error) {
 	_, err := s.store.GetUser(name)
 	if err == nil {
-		return nil, UserExists
-	} else {
-		if err != UserNotFound {
-			return nil, err
-		}
+		return nil, ErrUserExists
+	}
+	if err != ErrUserNotFound {
+		return nil, err
 	}
 
 	var user = User{Name: name}
@@ -209,7 +205,6 @@ func (s *Store) register(sess *Session, name, pass string) (*User, error) {
 	user.Salt = make([]byte, 32)
 	_, err = rand.Read(user.Salt)
 	if err != nil {
-		log.Println("Rand error:", err)
 		return nil, err
 	}
 
@@ -222,7 +217,6 @@ func (s *Store) register(sess *Session, name, pass string) (*User, error) {
 		return &user, err
 	}
 	sess.LoggedIn = true
-	sess.Bound = true
 	sess.User = name
 	return &user, nil
 }
@@ -261,11 +255,10 @@ func (s *Store) loginID(id string, user, pass string) (*User, bool, error) {
 func (s *Store) login(sess *Session, username, password string) (*User, error) {
 	user, err := s.store.GetUser(username)
 	if err != nil {
-		if err == UserNotFound {
-			return nil, LoginWrong
-		} else {
-			return nil, err
+		if err == ErrUserNotFound {
+			return nil, ErrLoginWrong
 		}
+		return nil, err
 	}
 	dk, err := scrypt.Key([]byte(password), user.Salt, 16384, 8, 1, 32)
 	if err != nil {
@@ -273,12 +266,11 @@ func (s *Store) login(sess *Session, username, password string) (*User, error) {
 	}
 	if bytes.Equal(dk, user.Pass) {
 		sess.LoggedIn = true
-		sess.Bound = true
 		sess.User = username
 		return user, nil
 	}
 	sess.LoggedIn = false
-	return nil, LoginWrong
+	return nil, ErrLoginWrong
 }
 
 func (s *Store) Logout(w http.ResponseWriter, r *http.Request) error {
@@ -300,9 +292,13 @@ func (s *Store) logoutID(id string) (*Session, bool, error) {
 		return sess, changed, err
 	}
 	if changed {
-		return sess, changed, NotLoggedIn
+		return sess, changed, ErrNotLoggedIn
 	}
-	err = s.logout(sess)
+	if sess.LoggedIn == false {
+		err = ErrNotLoggedIn
+	} else {
+		sess.LoggedIn = false
+	}
 	if err != nil {
 		return sess, changed, err
 	}
@@ -312,14 +308,6 @@ func (s *Store) logoutID(id string) (*Session, bool, error) {
 		return sess, changed, err
 	}
 	return sess, changed, nil
-}
-
-func (s *Store) logout(sess *Session) error {
-	if sess.LoggedIn == false || sess.Bound == false {
-		return NotLoggedIn
-	}
-	sess.LoggedIn = false
-	return nil
 }
 
 // ==================================================
@@ -336,7 +324,6 @@ type User struct {
 
 type Session struct {
 	ID       string
-	Bound    bool
 	LoggedIn bool
 	Expires  time.Time
 	LastCon  time.Time
@@ -350,9 +337,6 @@ func makeSession() (*Session, error) {
 		return nil, err
 	}
 	str := base64.StdEncoding.EncodeToString(buf)
-	if SessionDebug {
-		log.Println("Sess created: ", str[:10])
-	}
 	expiration := time.Now().Add(SessionCookieExpiration)
 	s := Session{
 		ID:      str,
@@ -362,20 +346,20 @@ func makeSession() (*Session, error) {
 	return &s, nil
 }
 
-func DecodeUser(v []byte) (*User, error) {
-	user := new(User)
-	err := gob.NewDecoder(bytes.NewBuffer(v)).Decode(user)
-	if err != nil {
-		return nil, err
-	}
-	return user, nil
-}
+// func DecodeUser(v []byte) (*User, error) {
+// 	user := new(User)
+// 	err := gob.NewDecoder(bytes.NewBuffer(v)).Decode(user)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return user, nil
+// }
 
-func (u User) Encode() ([]byte, error) {
-	var buf bytes.Buffer
-	err := gob.NewEncoder(&buf).Encode(&u)
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
+// func (u User) Encode() ([]byte, error) {
+// 	var buf bytes.Buffer
+// 	err := gob.NewEncoder(&buf).Encode(&u)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return buf.Bytes(), nil
+// }
