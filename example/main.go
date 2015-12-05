@@ -1,3 +1,16 @@
+// Copyright © 2015 Martin Bertschler <mbertschler@gmail.com>.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
@@ -87,8 +100,9 @@ func logout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		w.Write([]byte("Method not allowed"))
+		return
 	}
-	err := userStore.Logout(w, r)
+	_, err := userStore.Logout(w, r)
 	if err != nil {
 		log.Println("Logout error:", err)
 		w.Write(errorPage(fmt.Sprintln("Logout error:", err)))
@@ -100,6 +114,7 @@ func save(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		w.Write([]byte("Method not allowed"))
+		return
 	}
 	user, err := userStore.Get(w, r)
 	if err != nil {
@@ -138,19 +153,19 @@ func index(w http.ResponseWriter, r *http.Request) {
 				</tr>
 				<tr>
 					<td>Session Expires</td>
-					<td>` + fmt.Sprint(user.Session.Expires) + `</td>
+					<td>` + fmt.Sprint(user.Expires) + `</td>
 				</tr>
 				<tr>
 					<td>Session LastCon</td>
-					<td>` + fmt.Sprint(user.Session.LastCon) + `</td>
+					<td>` + fmt.Sprint(user.LastAccess) + `</td>
 				</tr>
 				<tr>
 					<td>Session LoggedIn</td>
-					<td>` + fmt.Sprint(user.Session.LoggedIn) + `</td>
+					<td>` + fmt.Sprint(user.LoggedIn) + `</td>
 				</tr>
 				<tr>
 					<td>Session User</td>
-					<td>` + fmt.Sprint(user.Session.User) + `</td>
+					<td>` + fmt.Sprint(user.User) + `</td>
 				</tr>
 				<tr>
 					<td>Username</td>

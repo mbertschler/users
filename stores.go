@@ -1,3 +1,16 @@
+// Copyright © 2015 Martin Bertschler <mbertschler@gmail.com>.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package users
 
 import (
@@ -7,26 +20,28 @@ import (
 
 const storeDebug = false
 
-// MemoryStore is a thread safe memory backend for the Store type. It
+// memoryStore is a thread safe memory backend for the Store type. It
 // implements the Storer interface and provides user and session storage.
-type MemoryStore struct {
+// Do not use this directly, instead call NewMemoryStore().
+// memoryStore saves the actual values behind the passed pointers.
+type memoryStore struct {
 	sessions      map[string]Session
 	sessionsMutex sync.RWMutex
 	users         map[string]User
 	usersMutex    sync.RWMutex
 }
 
-// NewMemoryStore returns a Store with an initialized MemoryStore backend
+// NewMemoryStore returns a Store with a memory backend.
 func NewMemoryStore() *Store {
-	var s = MemoryStore{
+	var s = memoryStore{
 		sessions: make(map[string]Session),
 		users:    make(map[string]User),
 	}
 	return &Store{&s}
 }
 
-// GetSession gets a Session object from the MemoryStore
-func (s *MemoryStore) GetSession(id string) (*Session, error) {
+// GetSession gets a Session object from the memoryStore
+func (s *memoryStore) GetSession(id string) (*Session, error) {
 	if storeDebug {
 		log.Println("GetSession:", id)
 	}
@@ -39,8 +54,8 @@ func (s *MemoryStore) GetSession(id string) (*Session, error) {
 	return &sess, nil
 }
 
-// PutSession puts a Session object in the MemoryStore
-func (s *MemoryStore) PutSession(sess *Session) error {
+// PutSession puts a Session object in the memoryStore
+func (s *memoryStore) PutSession(sess *Session) error {
 	if storeDebug {
 		log.Println("PutSession:", sess.ID)
 	}
@@ -50,8 +65,8 @@ func (s *MemoryStore) PutSession(sess *Session) error {
 	return nil
 }
 
-// GetUser gets a User object from the MemoryStore
-func (s *MemoryStore) GetUser(name string) (*User, error) {
+// GetUser gets a User object from the memoryStore
+func (s *memoryStore) GetUser(name string) (*User, error) {
 	if storeDebug {
 		log.Println("GetUser:", name)
 	}
@@ -64,8 +79,8 @@ func (s *MemoryStore) GetUser(name string) (*User, error) {
 	return &u, nil
 }
 
-// PutUser puts a User object in the MemoryStore
-func (s *MemoryStore) PutUser(u *User) error {
+// PutUser puts a User object in the memoryStore
+func (s *memoryStore) PutUser(u *User) error {
 	if storeDebug {
 		log.Println("PutUser:", u.Name)
 	}
