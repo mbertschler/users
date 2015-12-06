@@ -32,8 +32,8 @@ type stringStore struct {
 	*users.Store
 }
 
-func (s stringStore) GetData(w http.ResponseWriter, r *http.Request) (*users.User, string, error) {
-	u, err := s.Get(w, r)
+func (s stringStore) CookieGetData(w http.ResponseWriter, r *http.Request) (*users.User, string, error) {
+	u, err := s.CookieGet(w, r)
 	data, ok := u.Data.(string)
 	if !ok {
 		data = "&nbsp;"
@@ -45,10 +45,14 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	flag.StringVar(&port, "port", ":8001", "Port for http server")
-	flag.StringVar(&path, "path", "./users.db", "Path for db file")
+	flag.StringVar(&path, "path", "", "Path for db file")
 	flag.Parse()
 
-	userStore = stringStore{users.NewMemoryStore()}
+	if path == "" {
+		userStore = stringStore{users.NewMemoryStore()}
+	} else {
+		userStore = stringStore{users.NewMemoryStore()}
+	}
 
 	http.HandleFunc("/", index)
 	http.HandleFunc("/login", login)
@@ -61,7 +65,9 @@ func main() {
 
 	log.Println("Testapp for \"github.com/mbertschler/users\"")
 	log.Println("Serving HTTP at " + port)
-	log.Println("Saving users DB at " + path)
+	if path != "" {
+		log.Println("Saving users DB at " + path)
+	}
 	log.Println("------------------------------------------")
 	log.Fatal(http.ListenAndServe(port, nil))
 }
@@ -72,7 +78,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Method not allowed"))
 		return
 	}
-	_, err := userStore.Login(w, r,
+	_, err := userStore.CookieLogin(w, r,
 		r.PostFormValue("user"),
 		r.PostFormValue("pass"),
 	)
@@ -89,7 +95,7 @@ func register(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Method not allowed"))
 		return
 	}
-	_, err := userStore.Register(w, r,
+	_, err := userStore.CookieRegister(w, r,
 		r.PostFormValue("user"),
 		r.PostFormValue("pass"))
 	if err != nil {
@@ -105,7 +111,7 @@ func logout(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Method not allowed"))
 		return
 	}
-	_, err := userStore.Logout(w, r)
+	_, err := userStore.CookieLogout(w, r)
 	if err != nil {
 		log.Println("Logout error:", err)
 		w.Write(errorPage(fmt.Sprintln("Logout error:", err)))
@@ -119,7 +125,7 @@ func del(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Method not allowed"))
 		return
 	}
-	_, err := userStore.Delete(w, r)
+	_, err := userStore.CookieDelete(w, r)
 	if err != nil {
 		log.Println("Delete error:", err)
 		w.Write(errorPage(fmt.Sprintln("Delete error:", err)))
@@ -133,7 +139,7 @@ func rename(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Method not allowed"))
 		return
 	}
-	_, err := userStore.SetName(w, r, r.PostFormValue("name"))
+	_, err := userStore.CookieSetName(w, r, r.PostFormValue("name"))
 	if err != nil {
 		log.Println("Rename error:", err)
 		w.Write(errorPage(fmt.Sprintln("Rename error:", err)))
@@ -147,7 +153,7 @@ func password(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Method not allowed"))
 		return
 	}
-	_, err := userStore.SetPassword(w, r, r.PostFormValue("pass"))
+	_, err := userStore.CookieSetPassword(w, r, r.PostFormValue("pass"))
 	if err != nil {
 		log.Println("Password error:", err)
 		w.Write(errorPage(fmt.Sprintln("Password error:", err)))
@@ -161,7 +167,7 @@ func save(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Method not allowed"))
 		return
 	}
-	user, err := userStore.Get(w, r)
+	user, err := userStore.CookieGet(w, r)
 	if !user.LoggedIn {
 		err = users.ErrUserNotFound
 	}
@@ -170,7 +176,7 @@ func save(w http.ResponseWriter, r *http.Request) {
 		w.Write(errorPage(fmt.Sprintln("Save error 1:", err)))
 		return
 	}
-	err = userStore.SaveData(user.Name, r.PostFormValue("val"))
+	_, err = userStore.UserSaveData(user.Name, r.PostFormValue("val"))
 	if err != nil {
 		log.Println("Save error 2:", err)
 		w.Write(errorPage(fmt.Sprintln("Save error 2:", err)))
@@ -179,7 +185,7 @@ func save(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 func index(w http.ResponseWriter, r *http.Request) {
-	user, data, err := userStore.GetData(w, r)
+	user, data, err := userStore.CookieGetData(w, r)
 	if err != nil {
 		log.Println("Index error:", err)
 		w.Write(errorPage(fmt.Sprintln("Index error:", err)))

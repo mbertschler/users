@@ -18,6 +18,7 @@ import (
 	"sync"
 )
 
+// enable debug messages when store functions are called
 const storeDebug = false
 
 // memoryStore is a thread safe memory backend for the Store type. It

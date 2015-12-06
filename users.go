@@ -93,12 +93,12 @@ func NewStore(s Storer) *Store {
 	return &Store{s}
 }
 
-// Get gets the User associated with the current client.
+// CookieGet gets the User associated with the current client.
 // If there is no session cookie set in the request or the session is expired
 // or not valid anymore, a new session cookie is created and set.
 // If no user is logged in with this session the nil value of User with the
 // embedded Session is returned.
-func (s *Store) Get(w http.ResponseWriter, r *http.Request) (*User, error) {
+func (s *Store) CookieGet(w http.ResponseWriter, r *http.Request) (*User, error) {
 	user, changed, err := s.getID(s.getCookieID(r))
 	if changed {
 		s.saveCookie(w, user.Session)
@@ -106,7 +106,7 @@ func (s *Store) Get(w http.ResponseWriter, r *http.Request) (*User, error) {
 	return user, err
 }
 
-// GetID gets the User associated with a session ID.
+// IDGet gets the User associated with a session ID.
 // If there is no session with this ID or the session expired,
 // a new session is created.
 // If no user is logged in with this session the nil value of User with the
@@ -114,7 +114,7 @@ func (s *Store) Get(w http.ResponseWriter, r *http.Request) (*User, error) {
 //
 // It is the callers responsibility to pass the session token (User.ID) back
 // to the client.
-func (s *Store) GetID(id string) (*User, error) {
+func (s *Store) IDGet(id string) (*User, error) {
 	user, _, err := s.getID(id)
 	return user, err
 }
@@ -143,16 +143,20 @@ func (s *Store) getID(id string) (*User, bool, error) {
 	return user, changed, nil
 }
 
-// Save saves the passed data into the Data field of the User object
+// UserSaveData saves the passed data into the Data field of the User object
 // with the name specified in username. If the user
 // does not exist ErrUserNotFound is returned.
-func (s *Store) SaveData(username string, data interface{}) error {
+func (s *Store) UserSaveData(username string, data interface{}) (*User, error) {
 	u, err := s.store.GetUser(username)
 	if err != nil {
-		return ErrUserNotFound
+		return nil, ErrUserNotFound
 	}
 	u.Data = data
-	return s.store.PutUser(u)
+	err = s.store.PutUser(u)
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
 }
 
 func (s *Store) getSessionID(id string) (*Session, bool, error) {
@@ -211,9 +215,9 @@ func (s *Store) saveCookie(w http.ResponseWriter, sess *Session) {
 	http.SetCookie(w, &cookie)
 }
 
-// Register registers a new user with a username and password. If the given
+// CookieRegister registers a new user with a username and password. If the given
 // username already exists ErrUserExists is returned.
-func (s *Store) Register(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error) {
+func (s *Store) CookieRegister(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error) {
 	u, changed, err := s.registerID(s.getCookieID(r), user, pass)
 	if changed {
 		s.saveCookie(w, u.Session)
@@ -221,12 +225,12 @@ func (s *Store) Register(w http.ResponseWriter, r *http.Request, user, pass stri
 	return u, err
 }
 
-// RegisterID registers a new user with a username and password. If the given
+// IDRegister registers a new user with a username and password. If the given
 // username already exists ErrUserExists is returned.
 //
 // It is the callers responsibility to pass the session token (User.ID) back
 // to the client.
-func (s *Store) RegisterID(id string, user, pass string) (*User, error) {
+func (s *Store) IDRegister(id string, user, pass string) (*User, error) {
 	u, _, err := s.registerID(id, user, pass)
 	return u, err
 }
@@ -281,10 +285,10 @@ func (s *Store) register(sess *Session, name, pass string) (*User, error) {
 	return &user, nil
 }
 
-// SetName renames the current user to the new name. If the new
+// CookieSetName renames the current user to the new name. If the new
 // username already exists ErrUserExists is returned. If there is no current
 // user logged in ErrNotLoggedIn is returned.
-func (s *Store) SetName(w http.ResponseWriter, r *http.Request, name string) (*User, error) {
+func (s *Store) CookieSetName(w http.ResponseWriter, r *http.Request, name string) (*User, error) {
 	u, changed, err := s.setNameID(s.getCookieID(r), name)
 	if changed {
 		s.saveCookie(w, u.Session)
@@ -292,13 +296,13 @@ func (s *Store) SetName(w http.ResponseWriter, r *http.Request, name string) (*U
 	return u, err
 }
 
-// SetNameID renames the current user to the new name. If the new
+// IDSetName renames the current user to the new name. If the new
 // username already exists ErrUserExists is returned. If there is no current
 // user logged in ErrNotLoggedIn is returned.
 //
 // It is the callers responsibility to pass the session token (User.ID) back
 // to the client.
-func (s *Store) SetNameID(id string, name string) (*User, error) {
+func (s *Store) IDSetName(id string, name string) (*User, error) {
 	u, _, err := s.setNameID(id, name)
 	return u, err
 }
@@ -353,9 +357,9 @@ func (s *Store) setName(sess *Session, name string) (*User, error) {
 	return user, nil
 }
 
-// SetPassword sets the password of the current user to a new one. If
+// CookieSetPassword sets the password of the current user to a new one. If
 // there is no current user logged in ErrNotLoggedIn is returned.
-func (s *Store) SetPassword(w http.ResponseWriter, r *http.Request, pass string) (*User, error) {
+func (s *Store) CookieSetPassword(w http.ResponseWriter, r *http.Request, pass string) (*User, error) {
 	u, changed, err := s.setPasswordID(s.getCookieID(r), pass)
 	if changed {
 		s.saveCookie(w, u.Session)
@@ -363,12 +367,12 @@ func (s *Store) SetPassword(w http.ResponseWriter, r *http.Request, pass string)
 	return u, err
 }
 
-// SetPassword sets the password of the current user to a new one. If
+// IDSetPassword sets the password of the current user to a new one. If
 // there is no current user logged in ErrNotLoggedIn is returned.
 //
 // It is the callers responsibility to pass the session token (User.ID) back
 // to the client.
-func (s *Store) SetPasswordID(id string, pass string) (*User, error) {
+func (s *Store) IDSetPassword(id string, pass string) (*User, error) {
 	u, _, err := s.setPasswordID(id, pass)
 	return u, err
 }
@@ -418,9 +422,9 @@ func (s *Store) setPassword(sess *Session, pass string) (*User, error) {
 	return user, nil
 }
 
-// Login logs a user in with a username and password. If the credentials for
+// CookieLogin logs a user in with a username and password. If the credentials for
 // the login are wrong, ErrLoginWrong is returned.
-func (s *Store) Login(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error) {
+func (s *Store) CookieLogin(w http.ResponseWriter, r *http.Request, user, pass string) (*User, error) {
 	u, changed, err := s.loginID(s.getCookieID(r), user, pass)
 	if changed {
 		s.saveCookie(w, u.Session)
@@ -428,12 +432,12 @@ func (s *Store) Login(w http.ResponseWriter, r *http.Request, user, pass string)
 	return u, err
 }
 
-// LoginID logs a user in with a username and password. If the credentials for
+// IDLogin logs a user in with a username and password. If the credentials for
 // the login are wrong, ErrLoginWrong is returned.
 //
 // It is the callers responsibility to pass the session token (User.ID) back
 // to the client.
-func (s *Store) LoginID(id string, user, pass string) (*User, error) {
+func (s *Store) IDLogin(id string, user, pass string) (*User, error) {
 	u, _, err := s.loginID(id, user, pass)
 	return u, err
 }
@@ -479,9 +483,9 @@ func (s *Store) login(sess *Session, username, password string) (*User, error) {
 	return nil, ErrLoginWrong
 }
 
-// Logout logs the user that is associated with this client. It
+// CookieLogout logs the user that is associated with this client. It
 // returns ErrNotLoggedIn if no user is currently logged in.
-func (s *Store) Logout(w http.ResponseWriter, r *http.Request) (*User, error) {
+func (s *Store) CookieLogout(w http.ResponseWriter, r *http.Request) (*User, error) {
 	sess, changed, err := s.logoutID(s.getCookieID(r))
 	if changed {
 		s.saveCookie(w, sess)
@@ -489,12 +493,12 @@ func (s *Store) Logout(w http.ResponseWriter, r *http.Request) (*User, error) {
 	return &User{Session: sess}, err
 }
 
-// LogoutID logs the user that is associated with this session id out. It
+// IDLogout logs the user that is associated with this session id out. It
 // returns ErrNotLoggedIn if no user is currently logged in.
 //
 // It is the callers responsibility to pass the session token (User.ID) back
 // to the client.
-func (s *Store) LogoutID(id string) (*User, error) {
+func (s *Store) IDLogout(id string) (*User, error) {
 	sess, _, err := s.logoutID(id)
 	return &User{Session: sess}, err
 }
@@ -523,9 +527,9 @@ func (s *Store) logoutID(id string) (*Session, bool, error) {
 	return sess, changed, nil
 }
 
-// Delete deletes the user that is associated with this client. It
+// CookieDelete deletes the user that is associated with this client. It
 // returns ErrNotLoggedIn if no user is currently logged in.
-func (s *Store) Delete(w http.ResponseWriter, r *http.Request) (*User, error) {
+func (s *Store) CookieDelete(w http.ResponseWriter, r *http.Request) (*User, error) {
 	sess, changed, err := s.deleteID(s.getCookieID(r))
 	if changed {
 		s.saveCookie(w, sess)
@@ -533,12 +537,12 @@ func (s *Store) Delete(w http.ResponseWriter, r *http.Request) (*User, error) {
 	return &User{Session: sess}, err
 }
 
-// LogoutID deltes the user that is associated with this session id. It
+// IDDelete deltes the user that is associated with this session id. It
 // returns ErrNotLoggedIn if no user is currently logged in.
 //
 // It is the callers responsibility to pass the session token (User.ID) back
 // to the client.
-func (s *Store) DeleteID(id string) (*User, error) {
+func (s *Store) IDDelete(id string) (*User, error) {
 	sess, _, err := s.deleteID(id)
 	return &User{Session: sess}, err
 }
