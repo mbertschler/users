@@ -19,6 +19,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/boltdb/bolt"
 	"github.com/mbertschler/users"
 )
 
@@ -26,6 +27,7 @@ var (
 	port      string
 	path      string
 	userStore stringStore
+	db        *bolt.DB
 )
 
 type stringStore struct {
@@ -51,7 +53,16 @@ func main() {
 	if path == "" {
 		userStore = stringStore{users.NewMemoryStore()}
 	} else {
-		userStore = stringStore{users.NewMemoryStore()}
+		var err error
+		db, err = bolt.Open(path, 0644, nil)
+		if err != nil {
+			log.Fatal("bolt.Open error:", err)
+		}
+		store, err := users.NewBoltDBStore(db)
+		if err != nil {
+			log.Fatal("users.NewBoltDBStore error:", err)
+		}
+		userStore = stringStore{store}
 	}
 
 	http.HandleFunc("/", index)
@@ -139,7 +150,7 @@ func rename(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Method not allowed"))
 		return
 	}
-	_, err := userStore.CookieSetName(w, r, r.PostFormValue("name"))
+	_, err := userStore.CookieSetUsername(w, r, r.PostFormValue("name"))
 	if err != nil {
 		log.Println("Rename error:", err)
 		w.Write(errorPage(fmt.Sprintln("Rename error:", err)))
@@ -167,19 +178,10 @@ func save(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Method not allowed"))
 		return
 	}
-	user, err := userStore.CookieGet(w, r)
-	if !user.LoggedIn {
-		err = users.ErrUserNotFound
-	}
+	_, err := userStore.CookieSaveData(w, r, r.PostFormValue("val"))
 	if err != nil {
-		log.Println("Save error 1:", err)
-		w.Write(errorPage(fmt.Sprintln("Save error 1:", err)))
-		return
-	}
-	_, err = userStore.UserSaveData(user.Name, r.PostFormValue("val"))
-	if err != nil {
-		log.Println("Save error 2:", err)
-		w.Write(errorPage(fmt.Sprintln("Save error 2:", err)))
+		log.Println("Save error:", err)
+		w.Write(errorPage(fmt.Sprintln("Save error:", err)))
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -202,15 +204,15 @@ func index(w http.ResponseWriter, r *http.Request) {
 			<tbody>
 				<tr>
 					<td>Session ID</td>
-					<td style="word-break: break-all;">` + fmt.Sprint(user.ID) + `</td>
+					<td style="word-break: break-all;">` + fmt.Sprint(user.Session.ID) + `</td>
 				</tr>
 				<tr>
 					<td>Session Expires</td>
-					<td>` + fmt.Sprint(user.Expires.Format("2006 Jan 02 15:04:05 MST -0700")) + `</td>
+					<td>` + fmt.Sprint(user.Session.Expires.Format("2006 Jan 02 15:04:05 MST -0700")) + `</td>
 				</tr>
 				<tr>
 					<td>Session LastCon</td>
-					<td>` + fmt.Sprint(user.LastAccess.Format("2006 Jan 02 15:04:05 MST -0700")) + `</td>
+					<td>` + fmt.Sprint(user.Session.LastAccess.Format("2006 Jan 02 15:04:05 MST -0700")) + `</td>
 				</tr>
 				<tr>
 					<td>Session LoggedIn</td>
@@ -218,11 +220,15 @@ func index(w http.ResponseWriter, r *http.Request) {
 				</tr>
 				<tr>
 					<td>Session User</td>
-					<td>` + fmt.Sprint(user.User) + `</td>
+					<td>` + fmt.Sprint(user.Session.Username) + `</td>
 				</tr>
 				<tr>
 					<td>Username</td>
 					<td>` + fmt.Sprint(user.Name) + `</td>
+				</tr>
+				<tr>
+					<td>Data</td>
+					<td>` + data + `</td>
 				</tr>
 			</tbody>
 		</table>
@@ -270,7 +276,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 			</form>
 		</div>
 		<div>
-			<h2>Set Value</h2>
+			<h2>Set Data</h2>
 			<p>` + data + `</p>
 			<form action="/save" method="POST">
 				<input type="text" name="val" placeholder="Value"/> <br/>

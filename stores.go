@@ -14,8 +14,11 @@
 package users
 
 import (
+	"encoding/json"
 	"log"
 	"sync"
+
+	"github.com/boltdb/bolt"
 )
 
 // enable debug messages when store functions are called
@@ -26,23 +29,23 @@ const storeDebug = false
 // Do not use this directly, instead call NewMemoryStore().
 // memoryStore saves the actual values behind the passed pointers.
 type memoryStore struct {
-	sessions      map[string]Session
+	sessions      map[string]StoredSession
 	sessionsMutex sync.RWMutex
-	users         map[string]User
+	users         map[string]StoredUser
 	usersMutex    sync.RWMutex
 }
 
 // NewMemoryStore returns a Store with a memory backend.
 func NewMemoryStore() *Store {
 	var s = memoryStore{
-		sessions: make(map[string]Session),
-		users:    make(map[string]User),
+		sessions: make(map[string]StoredSession),
+		users:    make(map[string]StoredUser),
 	}
-	return &Store{&s}
+	return NewStore(&s)
 }
 
 // GetSession gets a Session object from the memoryStore
-func (s *memoryStore) GetSession(id string) (*Session, error) {
+func (s *memoryStore) GetSession(id string) (*StoredSession, error) {
 	if storeDebug {
 		log.Println("GetSession:", id)
 	}
@@ -56,7 +59,7 @@ func (s *memoryStore) GetSession(id string) (*Session, error) {
 }
 
 // PutSession puts a Session object in the memoryStore
-func (s *memoryStore) PutSession(sess *Session) error {
+func (s *memoryStore) PutSession(sess *StoredSession) error {
 	if storeDebug {
 		log.Println("PutSession:", sess.ID)
 	}
@@ -78,7 +81,7 @@ func (s *memoryStore) DeleteSession(id string) error {
 }
 
 // ForEachSession ranges over all sessions from the memoryStore
-func (s *memoryStore) ForEachSession(fn func(s *Session) (del bool)) error {
+func (s *memoryStore) ForEachSession(fn func(s *StoredSession) (del bool)) error {
 	if storeDebug {
 		log.Println("ForEachSession")
 	}
@@ -97,7 +100,7 @@ func (s *memoryStore) ForEachSession(fn func(s *Session) (del bool)) error {
 }
 
 // GetUser gets a User object from the memoryStore
-func (s *memoryStore) GetUser(name string) (*User, error) {
+func (s *memoryStore) GetUser(name string) (*StoredUser, error) {
 	if storeDebug {
 		log.Println("GetUser:", name)
 	}
@@ -111,7 +114,7 @@ func (s *memoryStore) GetUser(name string) (*User, error) {
 }
 
 // PutUser puts a User object in the memoryStore
-func (s *memoryStore) PutUser(u *User) error {
+func (s *memoryStore) PutUser(u *StoredUser) error {
 	if storeDebug {
 		log.Println("PutUser:", u.Name)
 	}
@@ -133,9 +136,9 @@ func (s *memoryStore) DeleteUser(username string) error {
 }
 
 // ForEachUser ranges over all users from the memoryStore
-func (s *memoryStore) ForEachUser(fn func(u *User) (del bool)) error {
+func (s *memoryStore) ForEachUser(fn func(u *StoredUser) (del bool)) error {
 	if storeDebug {
-		log.Println("ForEachSession")
+		log.Println("ForEachUser")
 	}
 	s.usersMutex.RLock()
 	for k, v := range s.users {
@@ -151,92 +154,159 @@ func (s *memoryStore) ForEachUser(fn func(u *User) (del bool)) error {
 	return nil
 }
 
-// const (
-// 	DefaultSessionBucket = "users.S"
-// 	DefaultUserBucket    = "users.U"
-// )
+type boltDBStore struct {
+	db         *bolt.DB
+	sessBucket []byte
+	userBucket []byte
+}
 
-// type BoltDBStore struct {
-// 	db *bolt.DB
-// }
+// NewBoltDBStore returns a Store that used the passed BoltDB as
+// a storage backend.
+func NewBoltDBStore(db *bolt.DB) (*Store, error) {
+	err := db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte("users.S"))
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists([]byte("users.U"))
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	var s = boltDBStore{
+		db:         db,
+		sessBucket: []byte("users.S"),
+		userBucket: []byte("users.U"),
+	}
+	return NewStore(&s), nil
+}
 
-// func NewBoltDBStore(path string, mode os.FileMode, options *bolt.Options) *BoltDBStore {
-// 	var s = BoltDBStore{
-// 		users:    make(map[string]User),
-// 		sessions: make(map[string]Session),
-// 	}
-// 	return &s
-// }
+// GetSession gets a Session object from the boltDBStore
+func (s *boltDBStore) GetSession(id string) (*StoredSession, error) {
+	if storeDebug {
+		log.Println("GetSession:", id)
+	}
+	var sess StoredSession
+	err := s.db.View(func(tx *bolt.Tx) error {
+		val := tx.Bucket(s.sessBucket).Get([]byte(id))
+		if val == nil {
+			return ErrSessionNotFound
+		}
+		return json.Unmarshal(val, &sess)
+	})
+	return &sess, err
+}
 
-// type OpenBoltDBStore struct {
-// 	db            *bolt.DB
-// 	sessionBucket string
-// 	userBucket    string
-// }
+// PutSession puts a Session object in the boltDBStore
+func (s *boltDBStore) PutSession(sess *StoredSession) error {
+	if storeDebug {
+		log.Println("PutSession:", sess.ID)
+	}
+	return s.db.Update(func(tx *bolt.Tx) error {
+		val, err := json.Marshal(sess)
+		if err != nil {
+			return err
+		}
+		return tx.Bucket(s.sessBucket).Put([]byte(sess.ID), val)
+	})
+}
 
-// func NewOpenBoltDBStore(db *bolt.DB, sessionBucket, userBucket string) *OpenBoltDBStore {
-// 	var s = OpenBoltDBStore{
-// 		users:    make(map[string]User),
-// 		sessions: make(map[string]Session),
-// 	}
-// 	return &s
-// }
+// DeleteSession deletes a session object from the boltDBStore
+func (s *boltDBStore) DeleteSession(id string) error {
+	if storeDebug {
+		log.Println("DeleteSession:", id)
+	}
+	return s.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(s.sessBucket).Delete([]byte(id))
+	})
+}
 
-// func loadDB() {
-// 	var err error
-// 	db, err := bolt.Open(config.DBPath, 0644, &bolt.Options{Timeout: 1 * time.Second})
-// 	if err != nil {
-// 		log.Fatal("Could not open DB at", config.DBPath, ": ", err)
-// 	}
-// 	db.Update(func(tx *bolt.Tx) error {
-// 		_, err = tx.CreateBucketIfNotExists(BucketApp)
-// 		if err != nil {
-// 			log.Fatalln("Bucket app could not be created")
-// 		}
-// 		_, err = tx.CreateBucketIfNotExists(BucketEvents)
-// 		if err != nil {
-// 			log.Fatalln("Bucket events could not be created")
-// 		}
-// 		_, err = tx.CreateBucketIfNotExists(BucketProjects)
-// 		if err != nil {
-// 			log.Fatalln("Bucket projects could not be created")
-// 		}
-// 		_, err = tx.CreateBucketIfNotExists(BucketJury)
-// 		if err != nil {
-// 			log.Fatalln("Bucket jury could not be created")
-// 		}
-// 		_, err = tx.CreateBucketIfNotExists(BucketSMS)
-// 		if err != nil {
-// 			log.Fatalln("Bucket sms could not be created")
-// 		}
-// 		_, err = tx.CreateBucketIfNotExists(BucketSessions)
-// 		if err != nil {
-// 			log.Fatalln("Bucket sms could not be created")
-// 		}
-// 		return nil
-// 	})
-// }
+// ForEachSession ranges over all sessions from the boltDBStore
+func (s *boltDBStore) ForEachSession(fn func(s *StoredSession) (del bool)) error {
+	if storeDebug {
+		log.Println("ForEachSession")
+	}
+	var sess StoredSession
+	return s.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(s.sessBucket).ForEach(func(k, v []byte) error {
+			err := json.Unmarshal(v, &sess)
+			if err != nil {
+				return err
+			}
+			if fn(&sess) {
+				err := tx.Bucket(s.sessBucket).Delete(k)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	})
+}
 
-// func B(in string) []byte {
-// 	return []byte(in)
-// }
+// GetUser gets a User object from the boltDBStore
+func (s *boltDBStore) GetUser(name string) (*StoredUser, error) {
+	if storeDebug {
+		log.Println("GetUser:", name)
+	}
+	var user StoredUser
+	err := s.db.View(func(tx *bolt.Tx) error {
+		val := tx.Bucket(s.userBucket).Get([]byte(name))
+		if val == nil {
+			return ErrUserNotFound
+		}
+		return json.Unmarshal(val, &user)
+	})
+	return &user, err
+}
 
-// func IDtoBytes(id uint64) []byte {
-// 	idbytes := make([]byte, 8)
-// 	binary.BigEndian.PutUint64(idbytes, id)
-// 	return idbytes
-// }
+// PutUser puts a User object in the boltDBStore
+func (s *boltDBStore) PutUser(u *StoredUser) error {
+	if storeDebug {
+		log.Println("PutUser:", u.Name)
+	}
+	return s.db.Update(func(tx *bolt.Tx) error {
+		val, err := json.Marshal(u)
+		if err != nil {
+			return err
+		}
+		return tx.Bucket(s.userBucket).Put([]byte(u.Name), val)
+	})
+}
 
-// func BytesToID(b []byte) uint64 {
-// 	return binary.BigEndian.Uint64(b)
-// }
+// DeleteUser deletes a user object from the boltDBStore
+func (s *boltDBStore) DeleteUser(username string) error {
+	if storeDebug {
+		log.Println("DeleteUser:", username)
+	}
+	return s.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(s.userBucket).Delete([]byte(username))
+	})
+}
 
-// func TimeToBytes(t time.Time) []byte {
-// 	buf := make([]byte, 8)
-// 	binary.BigEndian.PutUint64(buf, uint64(t.UnixNano()))
-// 	return buf
-// }
-// func BytesToTime(b []byte) time.Time {
-// 	unixnano := binary.BigEndian.Uint64(b)
-// 	return time.Unix(0, int64(unixnano))
-// }
+// ForEachUser ranges over all users from the boltDBStore
+func (s *boltDBStore) ForEachUser(fn func(u *StoredUser) (del bool)) error {
+	if storeDebug {
+		log.Println("ForEachUser")
+	}
+	var user StoredUser
+	return s.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(s.userBucket).ForEach(func(k, v []byte) error {
+			err := json.Unmarshal(v, &user)
+			if err != nil {
+				return err
+			}
+			if fn(&user) {
+				err := tx.Bucket(s.userBucket).Delete(k)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	})
+}
