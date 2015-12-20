@@ -20,7 +20,7 @@ import (
 	"net/http"
 
 	"github.com/boltdb/bolt"
-	"github.com/mbertschler/users"
+	"github.com/mbertschler/crowd"
 )
 
 var (
@@ -31,10 +31,10 @@ var (
 )
 
 type stringStore struct {
-	*users.Store
+	*crowd.Store
 }
 
-func (s stringStore) CookieGetData(w http.ResponseWriter, r *http.Request) (*users.User, string, error) {
+func (s stringStore) CookieGetData(w http.ResponseWriter, r *http.Request) (*crowd.User, string, error) {
 	u, err := s.CookieGet(w, r)
 	data, ok := u.Data.(string)
 	if !ok {
@@ -51,16 +51,16 @@ func main() {
 	flag.Parse()
 
 	if path == "" {
-		userStore = stringStore{users.NewMemoryStore()}
+		userStore = stringStore{crowd.NewMemoryStore()}
 	} else {
 		var err error
 		db, err = bolt.Open(path, 0644, nil)
 		if err != nil {
 			log.Fatal("bolt.Open error:", err)
 		}
-		store, err := users.NewBoltDBStore(db)
+		store, err := crowd.NewBoltDBStore(db)
 		if err != nil {
-			log.Fatal("users.NewBoltDBStore error:", err)
+			log.Fatal("crowd.NewBoltDBStore error:", err)
 		}
 		userStore = stringStore{store}
 	}
@@ -74,10 +74,10 @@ func main() {
 	http.HandleFunc("/password", password)
 	http.HandleFunc("/save", save)
 
-	log.Println("Testapp for \"github.com/mbertschler/users\"")
+	log.Println("Testapp for \"github.com/mbertschler/crowd\"")
 	log.Println("Serving HTTP at " + port)
 	if path != "" {
-		log.Println("Saving users DB at " + path)
+		log.Println("Saving crowd DB at " + path)
 	}
 	log.Println("------------------------------------------")
 	log.Fatal(http.ListenAndServe(port, nil))
@@ -195,7 +195,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write([]byte(header + `
-		<h1>Testapp for package <a href="https://github.com/mbertschler/users">"github.com/mbertschler/users"</a></h1>
+		<h1>Testapp for package <a href="https://github.com/mbertschler/crowd">"github.com/mbertschler/crowd"</a></h1>
 		<table border="1">
 			<thead>
 					<th>Variable</th>
@@ -287,7 +287,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 
 func errorPage(in string) []byte {
 	return []byte(header + `
-		<h1>Testapp for package <a href="https://github.com/mbertschler/users">"github.com/mbertschler/users"</a></h1>
+		<h1>Testapp for package <a href="https://github.com/mbertschler/crowd">"github.com/mbertschler/crowd"</a></h1>
 		<h2>Error</h2>
 		<p>` + in + `</p>
 		<a href="/"><button type="submit">Back</button></a>
