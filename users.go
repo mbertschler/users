@@ -166,7 +166,7 @@ func (s *Store) StopSessionGC() error {
 
 // CountUsers returns the number of saved users
 func (s *Store) CountUsers() int {
-	return s.CountUsers()
+	return s.store.CountUsers()
 }
 
 // CookieGet gets the User associated with the current client.
