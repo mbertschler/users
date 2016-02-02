@@ -92,6 +92,8 @@ type Storer interface {
 	DeleteUser(id uint64) error
 	// Run fn for each user and delete if true is returned
 	ForEachUser(fn func(u *StoredUser) (del bool)) error
+	// Return the number of saved users
+	CountUsers() int
 }
 
 // Store is the main type of this library. It has a backend which can store
@@ -160,6 +162,11 @@ func (s *Store) StopSessionGC() error {
 	}
 	close(s.stop)
 	return nil
+}
+
+// CountUsers returns the number of saved users
+func (s *Store) CountUsers() int {
+	return s.CountUsers()
 }
 
 // CookieGet gets the User associated with the current client.

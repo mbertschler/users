@@ -49,6 +49,17 @@ func (s *memoryStore) nextUserID() uint64 {
 	return atomic.AddUint64(&s.maxUserID, 1)
 }
 
+// CountUsers returns the number of saved users
+func (s *memoryStore) CountUsers() int {
+	if storeDebug {
+		log.Println("CountUsers")
+	}
+	s.usersMutex.RLock()
+	count := len(s.users)
+	s.usersMutex.RUnlock()
+	return count
+}
+
 // GetSession gets a Session object from the memoryStore
 func (s *memoryStore) GetSession(id string) (*StoredSession, error) {
 	if storeDebug {
