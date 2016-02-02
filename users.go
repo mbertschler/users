@@ -65,6 +65,7 @@ var (
 
 // Storer is implemented for different storage backends. The Get and Put
 // methods need to be safe for use by multiple goroutines simultaneously.
+// User IDs need to start at index 1, because 0 is reserved for errors.
 type Storer interface {
 	// Get a Session from the store
 	// If Session is not found, error needs to be ErrSessionNotFound
@@ -78,11 +79,17 @@ type Storer interface {
 
 	// Get a User from the store
 	// If User is not found, error needs to be ErrUserNotFound
-	GetUser(name string) (*StoredUser, error)
+	GetUser(id uint64) (*StoredUser, error)
+	// If User is not found, error needs to be ErrUserNotFound
+	GetUserID(username string) (uint64, error)
 	// Put a User into the store
 	PutUser(u *StoredUser) error
+	// Add a User to the store and return the new user ID
+	AddUser(u *StoredUser) (uint64, error)
+	// Rename a User while keeping the ID the same
+	RenameUser(id uint64, newname string) error
 	// Delete a User from the store
-	DeleteUser(username string) error
+	DeleteUser(id uint64) error
 	// Run fn for each user and delete if true is returned
 	ForEachUser(fn func(u *StoredUser) (del bool)) error
 }
@@ -145,7 +152,7 @@ func (s *Store) StartSessionGC() error {
 	return nil
 }
 
-// StartSessionGC starts the session GC that regularly deletes expired
+// StopSessionGC stops the session GC that regularly deletes expired
 // sessions. It returns ErrSessionGCStopped if the GC is already stopped.
 func (s *Store) StopSessionGC() error {
 	if !s.gcRunning {
@@ -181,10 +188,20 @@ func (s *Store) IDGet(id string) (*User, error) {
 	return makeUser(user), err
 }
 
-// UserGet gets the User by its username. If the user
+// UserNameGet gets the User by its name. If the user
 // does not exist ErrUserNotFound is returned.
-func (s *Store) UserGet(username string) (*User, error) {
-	u, err := s.store.GetUser(username)
+func (s *Store) UserNameGet(username string) (*User, error) {
+	id, err := s.store.GetUserID(username)
+	if err != nil {
+		return nil, err
+	}
+	return s.UserIDGet(id)
+}
+
+// UserIDGet gets the User by its ID. If the user
+// does not exist ErrUserNotFound is returned.
+func (s *Store) UserIDGet(id uint64) (*User, error) {
+	u, err := s.store.GetUser(id)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +221,7 @@ func (s *Store) getID(id string) (*StoredUser, bool, error) {
 	}
 	var user *StoredUser
 	if sess.LoggedIn {
-		user, err = s.store.GetUser(sess.User)
+		user, err = s.store.GetUser(sess.UserID)
 	} else {
 		user = &StoredUser{}
 	}
@@ -242,17 +259,27 @@ func (s *Store) IDSaveData(id string, data interface{}) (*User, error) {
 	return makeUser(user), err
 }
 
-// UserSaveData saves the passed data into the Data field of the User object
+// UserNameSaveData saves the passed data into the Data field of the User object
 // with the name specified in username. If the user
 // does not exist ErrUserNotFound is returned.
-func (s *Store) UserSaveData(username string, data interface{}) (*User, error) {
-	u, err := s.userSaveData(username, data)
+func (s *Store) UserNameSaveData(username string, data interface{}) (*User, error) {
+	id, err := s.store.GetUserID(username)
+	if err != nil {
+		return makeUser(nil), err
+	}
+	return s.UserIDSaveData(id, data)
+}
 
+// UserIDSaveData saves the passed data into the Data field of the User object
+// with the id specified in id. If the user
+// does not exist ErrUserNotFound is returned.
+func (s *Store) UserIDSaveData(id uint64, data interface{}) (*User, error) {
+	u, err := s.userSaveData(id, data)
 	return makeUser(u), err
 }
 
-func (s *Store) userSaveData(username string, data interface{}) (*StoredUser, error) {
-	u, err := s.store.GetUser(username)
+func (s *Store) userSaveData(id uint64, data interface{}) (*StoredUser, error) {
+	u, err := s.store.GetUser(id)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +305,7 @@ func (s *Store) saveDataID(id string, data interface{}) (*StoredUser, bool, erro
 	if !sess.LoggedIn {
 		return nil, changed, ErrNotLoggedIn
 	}
-	user, err := s.userSaveData(sess.User, data)
+	user, err := s.userSaveData(sess.UserID, data)
 	if err != nil {
 		return &StoredUser{StoredSession: sess}, changed, err
 	}
@@ -371,10 +398,10 @@ func (s *Store) IDRegister(id string, username, pass string) (*User, error) {
 	return makeUser(u), err
 }
 
-// UserRegister registers a new user with a username and password. If the given
+// UserNameRegister registers a new user with a username and password. If the given
 // username already exists ErrUserExists is returned.
-func (s *Store) UserRegister(username, pass string) (*User, error) {
-	_, err := s.store.GetUser(username)
+func (s *Store) UserNameRegister(username, pass string) (*User, error) {
+	_, err := s.store.GetUserID(username)
 	if err == nil {
 		return nil, ErrUserExists
 	}
@@ -396,7 +423,9 @@ func (s *Store) UserRegister(username, pass string) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = s.store.PutUser(&user)
+	uid, err := s.store.AddUser(&user)
+	user.ID = uid
+	user.UserID = uid
 	if err != nil {
 		return makeUser(&user), err
 	}
@@ -422,7 +451,7 @@ func (s *Store) registerID(id string, user, pass string) (*StoredUser, bool, err
 }
 
 func (s *Store) register(sess *StoredSession, name, pass string) (*StoredUser, error) {
-	_, err := s.store.GetUser(name)
+	_, err := s.store.GetUserID(name)
 	if err == nil {
 		return nil, ErrUserExists
 	}
@@ -444,23 +473,20 @@ func (s *Store) register(sess *StoredSession, name, pass string) (*StoredUser, e
 	if err != nil {
 		return nil, err
 	}
-	err = s.store.PutUser(&user)
+	uid, err := s.store.AddUser(&user)
 	if err != nil {
 		return &user, err
 	}
 	sess.LoggedIn = true
-	sess.User = name
+	sess.UserID = uid
 	return &user, nil
 }
 
 // CookieSetUsername renames the current user to the new name. If the new
 // username already exists ErrUserExists is returned. If there is no current
 // user logged in ErrNotLoggedIn is returned.
-//
-// BUG(mbertschler): CookieSetUsername function does not set other logged in
-// sessions to the new username.
-func (s *Store) CookieSetUsername(w http.ResponseWriter, r *http.Request, username string) (*User, error) {
-	u, changed, err := s.setNameID(s.getCookieID(r), username)
+func (s *Store) CookieSetUsername(w http.ResponseWriter, r *http.Request, nextusername string) (*User, error) {
+	u, changed, err := s.setNameID(s.getCookieID(r), nextusername)
 	if changed {
 		s.saveCookie(w, u.StoredSession)
 	}
@@ -473,26 +499,30 @@ func (s *Store) CookieSetUsername(w http.ResponseWriter, r *http.Request, userna
 //
 // It is the callers responsibility to pass the session token (User.ID) back
 // to the client.
-//
-// BUG(mbertschler): IDSetUsername function does not set other logged in
-// sessions to the new username.
-func (s *Store) IDSetUsername(id string, username string) (*User, error) {
-	u, _, err := s.setNameID(id, username)
+func (s *Store) IDSetUsername(id string, nextusername string) (*User, error) {
+	u, _, err := s.setNameID(id, nextusername)
 	return makeUser(u), err
 }
 
-// UserSetUsername renames the current user to the new name. If the new
+// UserNameSetUsername renames the user to the new name. If the new
 // username already exists ErrUserExists is returned.
-//
-// BUG(mbertschler): UserSetUsername function does not set the logged in
-// sessions to the new username.
-func (s *Store) UserSetUsername(username, nextusername string) (*User, error) {
-	user, err := s.store.GetUser(username)
+func (s *Store) UserNameSetUsername(username, nextusername string) (*User, error) {
+	id, err := s.store.GetUserID(username)
+	if err != nil {
+		return makeUser(nil), err
+	}
+	return s.UserIDSetUsername(id, nextusername)
+}
+
+// UserIDSetUsername renames the user to the new name. If the new
+// username already exists ErrUserExists is returned.
+func (s *Store) UserIDSetUsername(id uint64, nextusername string) (*User, error) {
+	user, err := s.store.GetUser(id)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = s.store.GetUser(nextusername)
+	_, err = s.store.GetUserID(nextusername)
 	if err == nil {
 		return nil, ErrUserExists
 	}
@@ -502,7 +532,7 @@ func (s *Store) UserSetUsername(username, nextusername string) (*User, error) {
 
 	user.Name = nextusername
 
-	err = s.store.DeleteUser(username)
+	err = s.store.DeleteUser(id)
 	if err != nil {
 		return makeUser(user), err
 	}
@@ -536,12 +566,12 @@ func (s *Store) setName(sess *StoredSession, name string) (*StoredUser, error) {
 	if !sess.LoggedIn {
 		return nil, ErrNotLoggedIn
 	}
-	user, err := s.store.GetUser(sess.User)
+	user, err := s.store.GetUser(sess.UserID)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = s.store.GetUser(name)
+	_, err = s.store.GetUserID(name)
 	if err == nil {
 		return nil, ErrUserExists
 	}
@@ -549,18 +579,10 @@ func (s *Store) setName(sess *StoredSession, name string) (*StoredUser, error) {
 		return nil, err
 	}
 
-	err = s.store.DeleteUser(user.Name)
+	err = s.store.RenameUser(sess.UserID, name)
 	if err != nil {
 		return user, err
 	}
-
-	user.Name = name
-	err = s.store.PutUser(user)
-	if err != nil {
-		return user, err
-	}
-
-	sess.User = name
 	return user, nil
 }
 
@@ -584,10 +606,18 @@ func (s *Store) IDSetPassword(id string, pass string) (*User, error) {
 	return makeUser(u), err
 }
 
-// UserSetPassword sets the password of the current user to a new one. If
-// there is no current user logged in ErrNotLoggedIn is returned.
-func (s *Store) UserSetPassword(username, pass string) (*User, error) {
-	user, err := s.store.GetUser(username)
+// UserNameSetPassword sets the password of the current user to a new one.
+func (s *Store) UserNameSetPassword(username, pass string) (*User, error) {
+	id, err := s.store.GetUserID(username)
+	if err != nil {
+		return makeUser(nil), err
+	}
+	return s.UserIDSetPassword(id, pass)
+}
+
+// UserIDSetPassword sets the password of the user to a new one.
+func (s *Store) UserIDSetPassword(id uint64, pass string) (*User, error) {
+	user, err := s.store.GetUser(id)
 	if err != nil {
 		return nil, err
 	}
@@ -632,7 +662,7 @@ func (s *Store) setPassword(sess *StoredSession, pass string) (*StoredUser, erro
 	if !sess.LoggedIn {
 		return nil, ErrNotLoggedIn
 	}
-	user, err := s.store.GetUser(sess.User)
+	user, err := s.store.GetUser(sess.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -694,7 +724,14 @@ func (s *Store) loginID(id string, user, pass string) (*StoredUser, bool, error)
 }
 
 func (s *Store) login(sess *StoredSession, username, password string) (*StoredUser, error) {
-	user, err := s.store.GetUser(username)
+	uid, err := s.store.GetUserID(username)
+	if err != nil {
+		if err == ErrUserNotFound {
+			return nil, ErrLoginWrong
+		}
+		return nil, err
+	}
+	user, err := s.store.GetUser(uid)
 	if err != nil {
 		if err == ErrUserNotFound {
 			return nil, ErrLoginWrong
@@ -709,7 +746,7 @@ func (s *Store) login(sess *StoredSession, username, password string) (*StoredUs
 	}
 	if bytes.Equal(dk, user.Pass) {
 		sess.LoggedIn = true
-		sess.User = username
+		sess.UserID = user.ID
 		return user, nil
 	}
 	sess.LoggedIn = false
@@ -777,11 +814,21 @@ func (s *Store) IDDelete(id string) (*User, error) {
 	return makeUser(&StoredUser{StoredSession: sess}), err
 }
 
-// UserDelete deletes the user with the given username. It
+// UserIDDelete deletes the user with the given user ID. It
 // returns ErrUserNotFound if there is no such user stored.
-func (s *Store) UserDelete(username string) (*User, error) {
-	err := s.store.DeleteUser(username)
+func (s *Store) UserIDDelete(id uint64) (*User, error) {
+	err := s.store.DeleteUser(id)
 	return makeUser(nil), err
+}
+
+// UserNameDelete deletes the user with the given username. It
+// returns ErrUserNotFound if there is no such user stored.
+func (s *Store) UserNameDelete(username string) (*User, error) {
+	id, err := s.store.GetUserID(username)
+	if err != nil {
+		return makeUser(nil), err
+	}
+	return s.UserIDDelete(id)
 }
 
 func (s *Store) deleteID(id string) (*StoredSession, bool, error) {
@@ -792,10 +839,10 @@ func (s *Store) deleteID(id string) (*StoredSession, bool, error) {
 	if sess.LoggedIn == false {
 		err = ErrNotLoggedIn
 	} else {
-		err = s.store.DeleteUser(sess.User)
+		err = s.store.DeleteUser(sess.UserID)
 		if err == nil {
 			sess.LoggedIn = false
-			sess.User = ""
+			sess.UserID = 0
 		}
 	}
 	if err != nil {
@@ -823,7 +870,7 @@ type User struct {
 		ID         string
 		Expires    time.Time
 		LastAccess time.Time
-		Username   string
+		UserID     uint64
 	}
 }
 
@@ -849,12 +896,12 @@ func makeUser(user *StoredUser) *User {
 			ID         string
 			Expires    time.Time
 			LastAccess time.Time
-			Username   string
+			UserID     uint64
 		}{
 			ID:         s.ID,
 			Expires:    s.Expires,
 			LastAccess: s.LastAccess,
-			Username:   s.User,
+			UserID:     s.UserID,
 		},
 	}
 }
@@ -868,6 +915,7 @@ func makeUser(user *StoredUser) *User {
 // The Data field can hold arbitrary application data which is saved using
 // the Store.Save() method. To work with it use a type assertion.
 type StoredUser struct {
+	ID   uint64
 	Name string
 	Pass []byte
 	Salt []byte
@@ -884,7 +932,7 @@ type StoredSession struct {
 	Expires    time.Time
 	LastAccess time.Time
 	LoggedIn   bool
-	User       string
+	UserID     uint64
 }
 
 // make a new session with 24 random bytes which results in 32 base64 bytes

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 /*
-Package users provides user and session management for applications
+Package crowd provides user and session management for applications
 where users are identified by a session ID or HTTP cookie.
 
 For a basic usage example see the file example/main.go.

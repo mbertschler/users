@@ -12,5 +12,5 @@ To see how you can use the package see [this example](https://github.com/mbertsc
 
 ## License
 
-Users is released under the Apache 2.0 license. See
+Crowd is released under the Apache 2.0 license. See
 [LICENSE.txt](https://github.com/mbertschler/crowd/blob/master/LICENSE.txt)

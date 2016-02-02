@@ -53,16 +53,16 @@ func main() {
 	if path == "" {
 		userStore = stringStore{crowd.NewMemoryStore()}
 	} else {
-		var err error
-		db, err = bolt.Open(path, 0644, nil)
-		if err != nil {
-			log.Fatal("bolt.Open error:", err)
-		}
-		store, err := crowd.NewBoltDBStore(db)
-		if err != nil {
-			log.Fatal("crowd.NewBoltDBStore error:", err)
-		}
-		userStore = stringStore{store}
+		// var err error
+		// db, err = bolt.Open(path, 0644, nil)
+		// if err != nil {
+		// 	log.Fatal("bolt.Open error:", err)
+		// }
+		// store, err := crowd.NewBoltDBStore(db)
+		// if err != nil {
+		// 	log.Fatal("crowd.NewBoltDBStore error:", err)
+		// }
+		// userStore = stringStore{store}
 	}
 
 	http.HandleFunc("/", index)
@@ -75,7 +75,7 @@ func main() {
 	http.HandleFunc("/save", save)
 
 	log.Println("Testapp for \"github.com/mbertschler/crowd\"")
-	log.Println("Serving HTTP at " + port)
+	log.Println("Serving HTTP at http://localhost" + port)
 	if path != "" {
 		log.Println("Saving crowd DB at " + path)
 	}
@@ -219,8 +219,8 @@ func index(w http.ResponseWriter, r *http.Request) {
 					<td>` + fmt.Sprint(user.LoggedIn) + `</td>
 				</tr>
 				<tr>
-					<td>Session User</td>
-					<td>` + fmt.Sprint(user.Session.Username) + `</td>
+					<td>Session UserID</td>
+					<td>` + fmt.Sprint(user.Session.UserID) + `</td>
 				</tr>
 				<tr>
 					<td>Username</td>
