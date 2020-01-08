@@ -14,7 +14,7 @@ var sess = StoredSession{
 	LastAccess: time.Now(),
 	ID:         "j4haf8hlahj4haf8hlahj4haf8hlahh4",
 	LoggedIn:   true,
-	User:       "longestusernameever",
+	UserID:     123456,
 }
 
 var jsonBuffer []byte
