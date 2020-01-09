@@ -63,6 +63,53 @@ var (
 // ================= Main Interface =================
 // ==================================================
 
+type lookup int8
+
+const (
+	bySessionID lookup = iota + 1
+	byUserID
+	byUserName
+	byCookie
+)
+
+type Accessor struct {
+	lookup
+	sessionID     string
+	userID        uint64
+	userName      string
+	cookieRequest *http.Request
+	cookieWriter  http.ResponseWriter
+}
+
+func BySessionID(id string) *Accessor {
+	return &Accessor{
+		lookup:    bySessionID,
+		sessionID: id,
+	}
+}
+
+func ByUserID(id uint64) *Accessor {
+	return &Accessor{
+		lookup: byUserID,
+		userID: id,
+	}
+}
+
+func ByUserName(name string) *Accessor {
+	return &Accessor{
+		lookup:   byUserName,
+		userName: name,
+	}
+}
+
+func ByCookie(w http.ResponseWriter, r *http.Request) *Accessor {
+	return &Accessor{
+		lookup:        byCookie,
+		cookieRequest: r,
+		cookieWriter:  w,
+	}
+}
+
 // User is the type that is retuned from most Store methods. It contains
 // the Name of the user, which is also the identification when it is stored.
 // Salt is randomly generated on registration and used to salt the password
@@ -278,7 +325,6 @@ func (s *Store) getID(id string) (*User, bool, error) {
 // ErrNotLoggedIn is returned.
 func (s *Store) CookieSaveData(w http.ResponseWriter, r *http.Request, data interface{}) (*User, error) {
 	user, changed, err := s.saveDataID(s.getCookieID(r), data)
-	log.Println(user, changed, err)
 	if changed {
 		s.saveCookie(w, user.Session)
 	}

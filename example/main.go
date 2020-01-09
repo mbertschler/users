@@ -180,7 +180,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write([]byte(header + `
-		<h1>Testapp for package <a href="https://github.com/mbertschler/crowd">"github.com/mbertschler/crowd"</a></h1>
+		<h1>Testapp for package <a href="https://github.com/mbertschler/crowd">github.com/mbertschler/crowd</a></h1>
 		<table border="1">
 			<thead>
 					<th>Variable</th>
