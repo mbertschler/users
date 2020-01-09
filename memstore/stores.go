@@ -11,46 +11,47 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package crowd
+package memstore
 
 import (
 	"log"
 	"sync"
 	"sync/atomic"
+
+	"github.com/mbertschler/crowd"
 )
 
 // enable debug messages when store functions are called
 const storeDebug = false
 
-// memoryStore is a thread safe memory backend for the Store type. It
+// MemStore is a thread safe memory backend for the Store type. It
 // implements the Storer interface and provides user and session storage.
-// Do not use this directly, instead call NewMemoryStore().
+// Do not use this directly, instead call NewMemStore().
 // memoryStore saves the actual values behind the passed pointers.
-type memoryStore struct {
-	sessions      map[string]StoredSession
+type MemStore struct {
+	sessions      map[string]crowd.Session
 	sessionsMutex sync.RWMutex
-	users         map[uint64]StoredUser
+	users         map[uint64]crowd.User
 	usersMutex    sync.RWMutex
 	userIDs       map[string]uint64
 	maxUserID     uint64
 }
 
-// NewMemoryStore returns a Store with a memory backend.
-func NewMemoryStore() *Store {
-	var s = memoryStore{
-		sessions: make(map[string]StoredSession),
-		users:    make(map[uint64]StoredUser),
+// NewMemStore returns a Store with a memory backend.
+func NewMemStore() *MemStore {
+	return &MemStore{
+		sessions: make(map[string]crowd.Session),
+		users:    make(map[uint64]crowd.User),
 		userIDs:  make(map[string]uint64),
 	}
-	return NewStore(&s)
 }
 
-func (s *memoryStore) nextUserID() uint64 {
+func (s *MemStore) nextUserID() uint64 {
 	return atomic.AddUint64(&s.maxUserID, 1)
 }
 
 // CountUsers returns the number of saved users
-func (s *memoryStore) CountUsers() int {
+func (s *MemStore) CountUsers() int {
 	if storeDebug {
 		log.Println("CountUsers")
 	}
@@ -61,7 +62,7 @@ func (s *memoryStore) CountUsers() int {
 }
 
 // GetSession gets a Session object from the memoryStore
-func (s *memoryStore) GetSession(id string) (*StoredSession, error) {
+func (s *MemStore) GetSession(id string) (*crowd.Session, error) {
 	if storeDebug {
 		log.Println("GetSession:", id)
 	}
@@ -69,13 +70,13 @@ func (s *memoryStore) GetSession(id string) (*StoredSession, error) {
 	sess, ok := s.sessions[id]
 	s.sessionsMutex.RUnlock()
 	if !ok {
-		return nil, ErrSessionNotFound
+		return nil, crowd.ErrSessionNotFound
 	}
 	return &sess, nil
 }
 
 // PutSession puts a Session object in the memoryStore
-func (s *memoryStore) PutSession(sess *StoredSession) error {
+func (s *MemStore) PutSession(sess *crowd.Session) error {
 	if storeDebug {
 		log.Println("PutSession:", sess.ID)
 	}
@@ -86,7 +87,7 @@ func (s *memoryStore) PutSession(sess *StoredSession) error {
 }
 
 // DeleteSession deletes a session object from the memoryStore
-func (s *memoryStore) DeleteSession(id string) error {
+func (s *MemStore) DeleteSession(id string) error {
 	if storeDebug {
 		log.Println("DeleteSession:", id)
 	}
@@ -97,7 +98,7 @@ func (s *memoryStore) DeleteSession(id string) error {
 }
 
 // ForEachSession ranges over all sessions from the memoryStore
-func (s *memoryStore) ForEachSession(fn func(s *StoredSession) (del bool)) error {
+func (s *MemStore) ForEachSession(fn func(s *crowd.Session) (del bool)) error {
 	if storeDebug {
 		log.Println("ForEachSession")
 	}
@@ -116,7 +117,7 @@ func (s *memoryStore) ForEachSession(fn func(s *StoredSession) (del bool)) error
 }
 
 // GetUser gets a User object via the user ID from the memoryStore
-func (s *memoryStore) GetUser(id uint64) (*StoredUser, error) {
+func (s *MemStore) GetUser(id uint64) (*crowd.User, error) {
 	if storeDebug {
 		log.Println("GetUser:", id)
 	}
@@ -124,13 +125,13 @@ func (s *memoryStore) GetUser(id uint64) (*StoredUser, error) {
 	u, ok := s.users[id]
 	s.usersMutex.RUnlock()
 	if !ok {
-		return nil, ErrUserNotFound
+		return nil, crowd.ErrUserNotFound
 	}
 	return &u, nil
 }
 
 // GetUserID gets the user ID via the username from the memoryStore
-func (s *memoryStore) GetUserID(username string) (uint64, error) {
+func (s *MemStore) GetUserID(username string) (uint64, error) {
 	if storeDebug {
 		log.Println("GetUserID:", username)
 	}
@@ -138,13 +139,13 @@ func (s *memoryStore) GetUserID(username string) (uint64, error) {
 	uid, ok := s.userIDs[username]
 	s.usersMutex.RUnlock()
 	if !ok {
-		return 0, ErrUserNotFound
+		return 0, crowd.ErrUserNotFound
 	}
 	return uid, nil
 }
 
 // PutUser puts a User object in the memoryStore
-func (s *memoryStore) PutUser(u *StoredUser) error {
+func (s *MemStore) PutUser(u *crowd.User) error {
 	if storeDebug {
 		log.Println("PutUser:", u.ID, u.Name)
 	}
@@ -155,7 +156,7 @@ func (s *memoryStore) PutUser(u *StoredUser) error {
 }
 
 // AddUser puts a new User object in the memoryStore and returns the user ID
-func (s *memoryStore) AddUser(u *StoredUser) (uint64, error) {
+func (s *MemStore) AddUser(u *crowd.User) (uint64, error) {
 	if storeDebug {
 		log.Println("AddUser:", u.ID, u.Name)
 	}
@@ -171,7 +172,7 @@ func (s *memoryStore) AddUser(u *StoredUser) (uint64, error) {
 }
 
 // RenameUser renames a user while keeping the ID the same
-func (s *memoryStore) RenameUser(id uint64, newname string) error {
+func (s *MemStore) RenameUser(id uint64, newname string) error {
 	if storeDebug {
 		log.Println("RenameUser:", id, newname)
 	}
@@ -179,7 +180,7 @@ func (s *memoryStore) RenameUser(id uint64, newname string) error {
 	u, ok := s.users[id]
 	if !ok {
 		s.usersMutex.Unlock()
-		return ErrUserNotFound
+		return crowd.ErrUserNotFound
 	}
 	delete(s.userIDs, u.Name)
 	u.Name = newname
@@ -190,7 +191,7 @@ func (s *memoryStore) RenameUser(id uint64, newname string) error {
 }
 
 // DeleteUser deletes a user object from the memoryStore
-func (s *memoryStore) DeleteUser(id uint64) error {
+func (s *MemStore) DeleteUser(id uint64) error {
 	if storeDebug {
 		log.Println("DeleteUser:", id)
 	}
@@ -198,7 +199,7 @@ func (s *memoryStore) DeleteUser(id uint64) error {
 	u, ok := s.users[id]
 	if !ok {
 		s.usersMutex.Unlock()
-		return ErrUserNotFound
+		return crowd.ErrUserNotFound
 	}
 	delete(s.users, id)
 	delete(s.userIDs, u.Name)
@@ -207,7 +208,7 @@ func (s *memoryStore) DeleteUser(id uint64) error {
 }
 
 // ForEachUser ranges over all users from the memoryStore
-func (s *memoryStore) ForEachUser(fn func(u *StoredUser) (del bool)) error {
+func (s *MemStore) ForEachUser(fn func(u *crowd.User) (del bool)) error {
 	if storeDebug {
 		log.Println("ForEachUser")
 	}

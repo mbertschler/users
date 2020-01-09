@@ -20,6 +20,7 @@ import (
 	"net/http"
 
 	"github.com/mbertschler/crowd"
+	"github.com/mbertschler/crowd/memstore"
 )
 
 var (
@@ -47,7 +48,7 @@ func main() {
 	flag.StringVar(&port, "port", ":8001", "Port for http server")
 	flag.Parse()
 
-	userStore = stringStore{crowd.NewMemoryStore()}
+	userStore = stringStore{crowd.NewStore(memstore.NewMemStore())}
 
 	http.HandleFunc("/", index)
 	http.HandleFunc("/login", login)
