@@ -19,15 +19,14 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/boltdb/bolt"
 	"github.com/mbertschler/crowd"
+	"github.com/mbertschler/crowd/memstore"
 )
 
 var (
 	port      string
 	path      string
 	userStore stringStore
-	db        *bolt.DB
 )
 
 type stringStore struct {
@@ -47,23 +46,9 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	flag.StringVar(&port, "port", ":8001", "Port for http server")
-	flag.StringVar(&path, "path", "", "Path for db file")
 	flag.Parse()
 
-	if path == "" {
-		userStore = stringStore{crowd.NewMemoryStore()}
-	} else {
-		// var err error
-		// db, err = bolt.Open(path, 0644, nil)
-		// if err != nil {
-		// 	log.Fatal("bolt.Open error:", err)
-		// }
-		// store, err := crowd.NewBoltDBStore(db)
-		// if err != nil {
-		// 	log.Fatal("crowd.NewBoltDBStore error:", err)
-		// }
-		// userStore = stringStore{store}
-	}
+	userStore = stringStore{crowd.NewStore(memstore.NewMemStore())}
 
 	http.HandleFunc("/", index)
 	http.HandleFunc("/login", login)
@@ -195,7 +180,7 @@ func index(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write([]byte(header + `
-		<h1>Testapp for package <a href="https://github.com/mbertschler/crowd">"github.com/mbertschler/crowd"</a></h1>
+		<h1>Testapp for package <a href="https://github.com/mbertschler/crowd">github.com/mbertschler/crowd</a></h1>
 		<table border="1">
 			<thead>
 					<th>Variable</th>
